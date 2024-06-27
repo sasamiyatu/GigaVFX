@@ -1,0 +1,12 @@
+{
+    "dependencies": [
+      "sdl2",
+      "vulkan",
+      {
+        "name": "sdl2",
+        "default-features": false,
+        "features": [ "vulkan" ],
+        "platform": "windows"
+      }
+    ]
+}
