@@ -37,7 +37,7 @@ function(compile_shader src_file type entry_point)
         DEPENDS ${SOURCE_FILE}
         VERBATIM
     )
-    set(COMPILED_SHADERS ${COMPILED_SHADERS} ${OUTPUT_WGSL_FILE} PARENT_SCOPE)
+    set(COMPILED_SHADERS ${COMPILED_SHADERS} ${OUTPUT_SPV_FILE} PARENT_SCOPE)
     list(APPEND SHADER_SOURCES ${SOURCE_FILE})
 endfunction()
 
@@ -51,11 +51,14 @@ cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
 )
 
 add_executable(gigasticle
+    src/defines.h
     src/main.cpp
     src/log.h
+    src/stb_image.h
     src/VkBootstrap.h
     src/VkBootstrap.cpp
     src/VkBootstrapDispatch.h
+    src/vk_helpers.h
 )
 
 target_include_directories(gigasticle PUBLIC ${Vulkan_INCLUDE_DIRS})
