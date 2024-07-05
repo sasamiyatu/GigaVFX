@@ -33,7 +33,7 @@ function(compile_shader src_file type entry_point)
     set(SOURCE_FILE ${CMAKE_SOURCE_DIR}/${src_file})
     add_custom_command(
         OUTPUT ${OUTPUT_SPV_FILE}
-        COMMAND ${DXC} ARGS -E ${entry_point} -T ${type} -Zs -spirv -O0 -Zpr -Fo ${OUTPUT_SPV_FILE} ${SOURCE_FILE}
+        COMMAND ${DXC} ARGS -E ${entry_point} -T ${type} -Zs -spirv -O0 -Fo ${OUTPUT_SPV_FILE} ${SOURCE_FILE}
         DEPENDS ${SOURCE_FILE}
         VERBATIM
     )
@@ -43,6 +43,8 @@ endfunction()
 
 compile_shader(shaders/triangle.hlsl vs_6_6 vs_main)
 compile_shader(shaders/triangle.hlsl ps_6_6 fs_main)
+compile_shader(shaders/forward.hlsl vs_6_6 vs_main)
+compile_shader(shaders/forward.hlsl ps_6_6 fs_main)
 
 cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
     WHENCE shaders/generated
@@ -51,9 +53,12 @@ cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
 )
 
 add_executable(gigasticle
+    src/cgltf.h
     src/defines.h
     src/main.cpp
     src/log.h
+    src/spirv_reflect.c
+    src/spirv_reflect.h
     src/stb_image.h
     src/VkBootstrap.h
     src/VkBootstrap.cpp

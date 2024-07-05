@@ -1,8 +1,9 @@
 #pragma once
 
 #define VK_USE_PLATFORM_WIN32_KHR
+#define VK_NO_PROTOTYPES
+#include <Volk/volk.h>
 #include <stdio.h>
-#include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
