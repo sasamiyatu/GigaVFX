@@ -45,6 +45,7 @@ compile_shader(shaders/triangle.hlsl vs_6_6 vs_main)
 compile_shader(shaders/triangle.hlsl ps_6_6 fs_main)
 compile_shader(shaders/forward.hlsl vs_6_6 vs_main)
 compile_shader(shaders/forward.hlsl ps_6_6 fs_main)
+compile_shader(shaders/procedural_sky.hlsl cs_6_6 cs_main)
 
 cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
     WHENCE shaders/generated
@@ -58,8 +59,11 @@ add_executable(gigasticle
     src/main.cpp
     src/misc.h
     src/log.h
+    src/pipeline.h
+    src/pipeline.cpp
     src/spirv_reflect.c
     src/spirv_reflect.h
+    src/spirv_reflect.cpp
     src/stb_image.h
     src/VkBootstrap.h
     src/VkBootstrap.cpp

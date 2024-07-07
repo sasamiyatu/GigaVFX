@@ -26,11 +26,8 @@ CMRC_DECLARE(embedded_shaders);
 
 #include "../shaders/shared.h"
 
-//#define SPIRV_REFLECT_USE_SYSTEM_SPIRV_H
-#include "spirv_reflect.h"
-#include "spirv_reflect.c"
-
 #include "misc.h"
+#include "pipeline.h"
 
 constexpr uint32_t window_width = 1280;
 constexpr uint32_t window_height = 720;
@@ -39,7 +36,6 @@ constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
 
 #define CGLTF_FLOAT_COUNT(accessor) (cgltf_num_components(accessor->type) * accessor->count)
 #define VECTOR_SIZE_BYTES(x) (x.size() * sizeof(x[0]))
-
 
 struct CameraState
 {
@@ -79,310 +75,6 @@ struct Buffer
     VmaAllocation allocation = VK_NULL_HANDLE;
 
     operator bool() const { return buffer != VK_NULL_HANDLE; }
-};
-
-
-struct Pipeline
-{
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout layout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout set_layouts[4] = {};
-    uint32_t descriptor_set_count = 0;
-};
-
-struct PipelineBuilder
-{
-    VkDevice device;
-    VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
-    VkGraphicsPipelineCreateInfo pipeline_create_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-
-    static constexpr uint32_t max_shader_stages = 4;
-    VkPipelineShaderStageCreateInfo shader_stage_create_info[max_shader_stages] = {};
-    VkShaderModule shader_modules[max_shader_stages] = {};
-
-    struct
-    {
-        uint32_t* spirv;
-        uint32_t size;
-    } shader_sources[max_shader_stages];
-
-    VkPipelineVertexInputStateCreateInfo vertex_input_state = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_state = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
-    VkPipelineTessellationStateCreateInfo tesselation_state = { VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO };
-    VkPipelineViewportStateCreateInfo viewport_state = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
-    VkPipelineRasterizationStateCreateInfo rasterization_state = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
-    VkPipelineMultisampleStateCreateInfo multisample_state = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-    VkPipelineDepthStencilStateCreateInfo depth_stencil_state = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
-    VkPipelineColorBlendStateCreateInfo color_blend_state = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
-    VkPipelineDynamicStateCreateInfo dynamic_state = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
-    VkPipelineRenderingCreateInfo rendering_create_info = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
-
-    static constexpr uint32_t max_dynamic_states = 32;
-    uint32_t dynamic_state_count = 0;
-    VkDynamicState dynamic_states[max_dynamic_states] = {};
-
-    static constexpr uint32_t max_color_blend_attachments = 8;
-    VkPipelineColorBlendAttachmentState color_blend_attachments[max_color_blend_attachments] = {};
-    VkFormat color_attachment_formats[max_color_blend_attachments] = {};
-    uint32_t color_attachment_count = 0;
-
-    VkDescriptorSetLayout set_layouts[4] = {};
-
-    PipelineBuilder(VkDevice dev)
-        : device(dev)
-    {
-        pipeline_create_info.pNext = &rendering_create_info;
-        pipeline_create_info.pStages = shader_stage_create_info;
-        pipeline_create_info.pVertexInputState = &vertex_input_state;
-        pipeline_create_info.pInputAssemblyState = &input_assembly_state;
-        pipeline_create_info.pTessellationState = &tesselation_state;
-        pipeline_create_info.pViewportState = &viewport_state;
-        pipeline_create_info.pRasterizationState = &rasterization_state;
-        pipeline_create_info.pMultisampleState = &multisample_state;
-        pipeline_create_info.pDepthStencilState = &depth_stencil_state;
-        pipeline_create_info.pColorBlendState = &color_blend_state;
-        pipeline_create_info.pDynamicState = &dynamic_state;
-
-        // Set default values
-
-        input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-        viewport_state.viewportCount = 1;
-        viewport_state.scissorCount = 1;
-
-        rasterization_state.polygonMode = VK_POLYGON_MODE_FILL;
-        rasterization_state.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterization_state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-        rasterization_state.lineWidth = 1.0f;
-
-        multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-        color_blend_state.pAttachments = color_blend_attachments;
-
-        dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_VIEWPORT;
-        dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_SCISSOR;
-
-        dynamic_state.dynamicStateCount = dynamic_state_count;
-        dynamic_state.pDynamicStates = dynamic_states;
-
-        rendering_create_info.pColorAttachmentFormats = color_attachment_formats;
-    }
-
-    PipelineBuilder& add_color_attachment(VkFormat format)
-    {
-        color_blend_attachments[color_attachment_count].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        color_attachment_formats[color_attachment_count] = format;
-        color_attachment_count++;
-
-        color_blend_state.attachmentCount = color_attachment_count;
-        rendering_create_info.colorAttachmentCount = color_attachment_count;
-
-        return *this;
-    }
-
-    PipelineBuilder& set_depth_format(VkFormat format)
-    {
-        rendering_create_info.depthAttachmentFormat = format;
-
-        return *this;
-    }
-
-    PipelineBuilder& set_depth_test(VkBool32 enabled)
-    {
-        depth_stencil_state.depthTestEnable = enabled;
-
-        return *this;
-    }
-
-    PipelineBuilder& set_depth_write(VkBool32 enabled)
-    {
-        depth_stencil_state.depthWriteEnable = enabled;
-
-        return *this;
-    }
-
-    PipelineBuilder& set_depth_compare_op(VkCompareOp op)
-    {
-        depth_stencil_state.depthCompareOp = op;
-
-        return *this;
-    }
-
-    PipelineBuilder& set_layout(VkPipelineLayout layout)
-    {
-        pipeline_create_info.layout = layout;
-        
-        return *this;
-    }
-
-    PipelineBuilder& set_vertex_shader_spirv(uint32_t* data, size_t size)
-    {
-        return add_shader_stage_spirv(data, size, VK_SHADER_STAGE_VERTEX_BIT, "vs_main");
-    }
-
-    PipelineBuilder& set_fragment_shader_spirv(uint32_t* data, size_t size)
-    {
-        return add_shader_stage_spirv(data, size, VK_SHADER_STAGE_FRAGMENT_BIT, "fs_main");
-    }
-
-    static std::string get_embedded_path(const char* src_path, VkShaderStageFlagBits shader_stage)
-    {
-        std::string path = "shaders/" + std::string(src_path);
-        size_t dot = path.find_last_of('.');
-        path = path.substr(0, dot);
-        switch (shader_stage)
-        {
-        case VK_SHADER_STAGE_VERTEX_BIT:
-            path.append("_vs_6_6.spv");
-            break;
-        case VK_SHADER_STAGE_FRAGMENT_BIT:
-            path.append("_ps_6_6.spv");
-            break;
-        case VK_SHADER_STAGE_COMPUTE_BIT:
-            path.append("_cs_6_6.spv");
-            break;
-        default:
-            assert(false);
-            break;
-        }
-
-        return path;
-    }
-
-    PipelineBuilder& set_cull_mode(VkCullModeFlagBits cull_mode)
-    {
-        rasterization_state.cullMode = cull_mode;
-
-        return *this;
-    }
-
-    PipelineBuilder& set_vertex_shader_filepath(const char* filepath)
-    {
-        auto fs = cmrc::embedded_shaders::get_filesystem();
-        std::string path = get_embedded_path(filepath, VK_SHADER_STAGE_VERTEX_BIT);
-        auto file = fs.open(path);
-        assert(file.size() % 4 == 0);
-        return set_vertex_shader_spirv((uint32_t*)file.begin(), file.size());
-    }
-
-    PipelineBuilder& set_fragment_shader_filepath(const char* filepath)
-    {
-        auto fs = cmrc::embedded_shaders::get_filesystem();
-        std::string path = get_embedded_path(filepath, VK_SHADER_STAGE_FRAGMENT_BIT);
-        auto file = fs.open(path);
-        assert(file.size() % 4 == 0);
-        return set_fragment_shader_spirv((uint32_t*)file.begin(), file.size());
-    }
-
-    PipelineBuilder& add_shader_stage_spirv(uint32_t* data, size_t size, VkShaderStageFlagBits shader_stage, const char* entry_point)
-    {
-        uint32_t stage_count = pipeline_create_info.stageCount;
-        assert(stage_count < max_shader_stages);
-
-        VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-        info.codeSize = size;
-        info.pCode = data;
-        VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &shader_modules[stage_count]));
-
-        VkPipelineShaderStageCreateInfo& stage_info = shader_stage_create_info[stage_count];
-
-        stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stage_info.stage = shader_stage;
-        stage_info.module = shader_modules[stage_count];
-        stage_info.pName = entry_point;
-
-        shader_sources[stage_count].spirv = data;
-        shader_sources[stage_count].size = size;
-
-        pipeline_create_info.stageCount++;
-
-        return *this;
-    }
-
-    PipelineBuilder& set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout)
-    {
-        set_layouts[set_index] = layout;
-        return *this;
-    }
-
-    Pipeline build()
-    {
-        Pipeline pp{};
-
-        if (pipeline_create_info.layout == VK_NULL_HANDLE)
-        { // Create the layout
-            std::vector<VkDescriptorSetLayoutBinding> bindings[4];
-            uint32_t descriptor_set_count = 0;
-            uint32_t push_constant_size = 0;
-            VkShaderStageFlags pc_stage_flags = 0;
-            for (uint32_t i = 0; i < pipeline_create_info.stageCount; ++i)
-            {
-                SpvReflectShaderModule mod;
-                SpvReflectResult result = spvReflectCreateShaderModule(shader_sources[i].size, shader_sources[i].spirv, &mod);
-                assert(result == SPV_REFLECT_RESULT_SUCCESS);
-                descriptor_set_count = std::max(mod.descriptor_set_count, descriptor_set_count);
-                uint32_t pc_size = 0;
-                for (uint32_t j = 0; j < mod.push_constant_block_count; ++j)
-                {
-                    pc_size += mod.push_constant_blocks[j].size;
-                    pc_stage_flags |= mod.shader_stage;
-                }
-               
-                push_constant_size = std::max(push_constant_size, pc_size);
-                for (uint32_t j = 0; j < mod.descriptor_set_count; ++j)
-                {
-                    if (set_layouts[j] != VK_NULL_HANDLE) continue;
-                    SpvReflectDescriptorSet descriptor_set = mod.descriptor_sets[j];
-                    bindings[j].resize(std::max(descriptor_set.binding_count, (uint32_t)bindings[j].size()));
-                    for (uint32_t k = 0; k < descriptor_set.binding_count; ++k)
-                    {
-                        SpvReflectDescriptorBinding* binding = descriptor_set.bindings[k];
-                        VkDescriptorSetLayoutBinding& out_binding = bindings[j][k];
-                        out_binding.binding = binding->binding;
-                        out_binding.descriptorCount = binding->count;
-                        out_binding.descriptorType = (VkDescriptorType)binding->descriptor_type;
-                        out_binding.stageFlags |= mod.shader_stage;
-                    }
-
-                }
-            }
-
-            for (uint32_t i = 0; i < descriptor_set_count; ++i)
-            {
-                if (set_layouts[i] != VK_NULL_HANDLE) continue;
-                VkDescriptorSetLayoutCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-                info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-                info.bindingCount = bindings[i].size();
-                info.pBindings = bindings[i].data();
-                VK_CHECK(vkCreateDescriptorSetLayout(device, &info, nullptr, &set_layouts[i]));
-            }
-
-            VkPipelineLayoutCreateInfo info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-            info.setLayoutCount = descriptor_set_count;
-            info.pSetLayouts = set_layouts;
-            VkPushConstantRange range{};
-            range.stageFlags = pc_stage_flags;
-            range.size = push_constant_size;
-            info.pPushConstantRanges = &range;
-            info.pushConstantRangeCount = push_constant_size != 0 ? 1 : 0;
-            VkPipelineLayout layout = VK_NULL_HANDLE;
-            VK_CHECK(vkCreatePipelineLayout(device, &info, nullptr, &layout));
-            pipeline_create_info.layout = layout;
-            pp.layout = layout;
-            pp.descriptor_set_count = descriptor_set_count;
-            memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * descriptor_set_count);
-        }
-
-        VkPipeline pipeline = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateGraphicsPipelines(device, pipeline_cache, 1, &pipeline_create_info, nullptr, &pipeline));
-        for (uint32_t i = 0; i < pipeline_create_info.stageCount; ++i)
-        {
-            vkDestroyShaderModule(device, shader_modules[i], nullptr);
-        }
-        pp.pipeline = pipeline;
-
-        return pp;
-    }
 };
 
 VkImageAspectFlagBits determine_image_aspect(VkFormat format)
@@ -542,6 +234,7 @@ struct Context
 
         vkb::SwapchainBuilder swapchain_builder{ device };
         swapchain_builder.set_desired_format({ VK_FORMAT_B8G8R8A8_UNORM, VK_COLORSPACE_SRGB_NONLINEAR_KHR });
+        swapchain_builder.set_image_usage_flags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
         auto swap_ret = swapchain_builder.build();
         if (!swap_ret) {
             LOG_ERROR("Failed to create swapchain!");
@@ -713,7 +406,7 @@ struct Context
         image_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         image_barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
         image_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        image_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        image_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         image_barrier.image = swapchain_textures[swapchain_image_index].image;
         image_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         image_barrier.subresourceRange.baseArrayLayer = 0;
@@ -746,7 +439,7 @@ struct Context
         image_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         image_barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
         image_barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-        image_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        image_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
         image_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         image_barrier.image = swapchain_textures[swapchain_image_index].image;
         image_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -1080,51 +773,6 @@ int main()
 
     bool running = true;
 
-    PipelineBuilder pipeline_builder(ctx.device);
-
-    VkPipelineLayout _pipeline_layout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout _set_layout = VK_NULL_HANDLE;
-#if 0
-    {
-
-        VkDescriptorSetLayoutBinding bindings[] = {
-            {0, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
-            {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
-            {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT},
-            {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT},
-        };
-        VkDescriptorSetLayoutCreateInfo desc_info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        desc_info.bindingCount = (uint32_t)std::size(bindings);
-        desc_info.pBindings = bindings;
-        desc_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-        /*typedef struct VkDescriptorSetLayoutCreateInfo {
-    VkStructureType                        sType;
-    const void*                            pNext;
-    VkDescriptorSetLayoutCreateFlags       flags;
-    uint32_t                               bindingCount;
-    const VkDescriptorSetLayoutBinding*    pBindings;
-} VkDescriptorSetLayoutCreateInfo;*/
-
-        VkPipelineLayoutCreateInfo layout_create_info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-        layout_create_info.setLayoutCount = 1;
-        layout_create_info.pSetLayouts = &set_layout;
-        VkPushConstantRange range{};
-        range.size = 128;
-        range.offset = 0;
-        range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        layout_create_info.pushConstantRangeCount = 1;
-        layout_create_info.pPushConstantRanges = &range;
-        /*    VkStructureType                 sType;
-        const void*                     pNext;
-        VkPipelineLayoutCreateFlags     flags;
-        uint32_t                        setLayoutCount;
-        const VkDescriptorSetLayout*    pSetLayouts;
-        uint32_t                        pushConstantRangeCount;
-        const VkPushConstantRange*      pPushConstantRanges;*/
-        VK_CHECK(vkCreateDescriptorSetLayout(ctx.device, &desc_info, nullptr, &set_layout));
-        VK_CHECK(vkCreatePipelineLayout(ctx.device, &layout_create_info, nullptr, &pipeline_layout));
-    }
-#endif
 
     VkSampler sampler = VK_NULL_HANDLE;
     {
@@ -1144,6 +792,7 @@ int main()
     Texture depth_texture;
     ctx.create_texture(depth_texture, window_width, window_height, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
 
+    GraphicsPipelineBuilder pipeline_builder(ctx.device);
     Pipeline pipeline = pipeline_builder
         .set_vertex_shader_filepath("forward.hlsl")
         .set_fragment_shader_filepath("forward.hlsl")
@@ -1155,6 +804,11 @@ int main()
         .set_depth_write(VK_TRUE)
         .set_depth_compare_op(VK_COMPARE_OP_LESS)
         .set_descriptor_set_layout(1, ctx.bindless_descriptor_set_layout)
+        .build();
+
+    ComputePipelineBuilder compute_builder(ctx.device);
+    Pipeline procedural_skybox_pipeline = compute_builder
+        .set_shader_filepath("procedural_sky.hlsl")
         .build();
 
     int x, y, c;
@@ -1551,10 +1205,42 @@ int main()
             vkCmdPipelineBarrier2(command_buffer, &dep_info);
         }
 
+        { // Procedural sky box
+            VkWriteDescriptorSet descriptors[2] = {};
+
+            VkDescriptorBufferInfo binfo0{};
+            binfo0.buffer = globals_buffer.buffer;
+            binfo0.offset = 0;
+            binfo0.range = VK_WHOLE_SIZE;
+            descriptors[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptors[0].dstSet = 0;
+            descriptors[0].dstBinding = 0;
+            descriptors[0].descriptorCount = 1;
+            descriptors[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptors[0].pBufferInfo = &binfo0;
+
+            VkDescriptorImageInfo iinfo0{};
+            iinfo0.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            iinfo0.imageView = swapchain_texture.view;
+            descriptors[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptors[1].dstSet = 0;
+            descriptors[1].dstBinding = 1;
+            descriptors[1].descriptorCount = 1;
+            descriptors[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            descriptors[1].pImageInfo = &iinfo0;
+
+
+            vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline.layout, 0, std::size(descriptors), descriptors);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline.pipeline);
+            uint32_t dispatch_x = get_golden_dispatch_size(window_width);
+            uint32_t dispatch_y = get_golden_dispatch_size(window_height);
+            vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
+        }
+
         VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
         color_info.imageView = swapchain_texture.view;
-        color_info.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        color_info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        color_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        color_info.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         color_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         color_info.clearValue.color = { 0.1f, 0.1f, 0.2f, 1.0f };
 
@@ -1684,6 +1370,14 @@ int main()
         vkDestroyDescriptorSetLayout(ctx.device, pipeline.set_layouts[i], nullptr);
     }
     vkDestroyPipelineLayout(ctx.device, pipeline.layout, nullptr);
+
+    vkDestroyPipeline(ctx.device, procedural_skybox_pipeline.pipeline, nullptr);
+    for (uint32_t i = 0; i < procedural_skybox_pipeline.descriptor_set_count; ++i)
+    {
+        if (procedural_skybox_pipeline.set_layouts[i] == ctx.bindless_descriptor_set_layout) continue;
+        vkDestroyDescriptorSetLayout(ctx.device, procedural_skybox_pipeline.set_layouts[i], nullptr);
+    }
+    vkDestroyPipelineLayout(ctx.device, procedural_skybox_pipeline.layout, nullptr);
 
     ctx.shutdown();
 

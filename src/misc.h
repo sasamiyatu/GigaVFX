@@ -13,3 +13,9 @@ inline size_t align_power_of_2(size_t size, size_t alignment)
     assert(alignment != 0 && (alignment & mask) == 0);
     return (size + mask) & ~(mask);
 }
+
+inline uint32_t get_golden_dispatch_size(uint32_t size)
+{
+    constexpr uint32_t golden_workgroup_size = 8;
+    return align_power_of_2(size, golden_workgroup_size) / golden_workgroup_size;
+}
