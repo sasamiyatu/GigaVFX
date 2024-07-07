@@ -56,6 +56,7 @@ add_executable(gigasticle
     src/cgltf.h
     src/defines.h
     src/main.cpp
+    src/misc.h
     src/log.h
     src/spirv_reflect.c
     src/spirv_reflect.h

@@ -24,9 +24,13 @@ CMRC_DECLARE(embedded_shaders);
 #include "glm/gtc/type_ptr.hpp"
 #include "glm/gtx/euler_angles.hpp"
 
+#include "../shaders/shared.h"
+
 //#define SPIRV_REFLECT_USE_SYSTEM_SPIRV_H
 #include "spirv_reflect.h"
 #include "spirv_reflect.c"
+
+#include "misc.h"
 
 constexpr uint32_t window_width = 1280;
 constexpr uint32_t window_height = 720;
@@ -71,8 +75,8 @@ struct BufferDesc
 
 struct Buffer
 {
-    VkBuffer buffer;
-    VmaAllocation allocation;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocation allocation = VK_NULL_HANDLE;
 
     operator bool() const { return buffer != VK_NULL_HANDLE; }
 };
@@ -496,6 +500,7 @@ struct Context
 
         VkPhysicalDeviceFeatures features{};
         features.shaderInt64 = VK_TRUE;
+        features.samplerAnisotropy = VK_TRUE;
 
         vkb::PhysicalDeviceSelector phys_device_selector(instance);
         auto physical_device_selector_return = phys_device_selector
@@ -532,10 +537,11 @@ struct Context
 
         graphics_queue_family_index = device.get_queue_index(vkb::QueueType::graphics).value();
         graphics_queue = device.get_queue(vkb::QueueType::graphics).value();
-        transfer_queue_family_index = device.get_queue_index(vkb::QueueType::transfer).value();
-        transfer_queue = device.get_queue(vkb::QueueType::transfer).value();
+        transfer_queue_family_index = device.get_queue_index(vkb::QueueType::graphics).value();
+        transfer_queue = device.get_queue(vkb::QueueType::graphics).value();
 
         vkb::SwapchainBuilder swapchain_builder{ device };
+        swapchain_builder.set_desired_format({ VK_FORMAT_B8G8R8A8_UNORM, VK_COLORSPACE_SRGB_NONLINEAR_KHR });
         auto swap_ret = swapchain_builder.build();
         if (!swap_ret) {
             LOG_ERROR("Failed to create swapchain!");
@@ -581,7 +587,7 @@ struct Context
         }
 
         {
-            transfer_command_pool = VkHelpers::create_command_pool(device, transfer_queue_family_index);
+            transfer_command_pool = VkHelpers::create_command_pool(device, graphics_queue_family_index);
 
             VkCommandBufferAllocateInfo cmd_info{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
             cmd_info.commandPool = transfer_command_pool;
@@ -823,9 +829,11 @@ struct Context
         for (uint32_t i = 0; i < count; ++i)
         {
             Texture& t = textures[i];
-            if (!create_texture(t, t.width, t.height, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 1, 1))
+            uint32_t mip_count = get_mip_count(t.width, t.height);
+            VkImageUsageFlags image_usage_flags = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            if (!create_texture(t, t.width, t.height, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D, image_usage_flags, mip_count, 1))
             {
-                exit(1);
+                return false;
             }
 
             const uint32_t n_channels = 4;
@@ -880,7 +888,7 @@ struct Context
                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                     0,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     t.image
                 );
 
@@ -891,6 +899,88 @@ struct Context
             }
 
             t.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            int32_t width = t.width;
+            int32_t height = t.height;
+            for (uint32_t i = 1; i < mip_count; ++i)
+            {
+                int32_t next_width = std::max(width >> 1, 1);
+                int32_t next_height = std::max(height >> 1, 1);
+
+                { // Transition to transfer dst optimal
+                    VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        0,
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        0,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        t.image,
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                        i, 1
+                    );
+
+                    VkDependencyInfo dep_info{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+                    dep_info.imageMemoryBarrierCount = 1;
+                    dep_info.pImageMemoryBarriers = &barrier;
+                    vkCmdPipelineBarrier2(transfer_command_buffer, &dep_info);
+                }
+                VkImageBlit region{};
+                region.srcOffsets[0] = { 0, 0, 0 };
+                region.srcOffsets[1] = { width, height, 1 };
+                region.dstOffsets[0] = { 0, 0, 0 };
+                region.dstOffsets[1] = { next_width, next_height, 1 };
+                region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.srcSubresource.mipLevel = i - 1;
+                region.srcSubresource.baseArrayLayer = 0;
+                region.srcSubresource.layerCount = 1;
+                region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.dstSubresource.mipLevel = i;
+                region.dstSubresource.baseArrayLayer = 0;
+                region.dstSubresource.layerCount = 1;
+                vkCmdBlitImage(transfer_command_buffer, t.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region, VK_FILTER_LINEAR);
+
+                { // Transition to transfer src optimal
+                    VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        0,
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        0,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        t.image,
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                        i, 1
+                    );
+
+                    VkDependencyInfo dep_info{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+                    dep_info.imageMemoryBarrierCount = 1;
+                    dep_info.pImageMemoryBarriers = &barrier;
+                    vkCmdPipelineBarrier2(transfer_command_buffer, &dep_info);
+                }
+
+                width = next_width;
+                height = next_height;
+            }
+
+            { // Transition to transfer src optimal
+                VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    0,
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    0,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    t.image,
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, VK_REMAINING_MIP_LEVELS
+                );
+
+                VkDependencyInfo dep_info{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+                dep_info.imageMemoryBarrierCount = 1;
+                dep_info.pImageMemoryBarriers = &barrier;
+                vkCmdPipelineBarrier2(transfer_command_buffer, &dep_info);
+            }
         }
 
         vkEndCommandBuffer(transfer_command_buffer);
@@ -909,6 +999,8 @@ struct Context
         {
             vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
         }
+
+        return true;
     }
 
     Buffer create_buffer(const BufferDesc& desc)
@@ -968,24 +1060,6 @@ struct Mesh
     Buffer tangent;
     Buffer texcoord0;
     Buffer texcoord1;
-};
-
-struct Material
-{
-    glm::vec4 basecolor_factor;
-    float roughness_factor;
-    float metallic_factor;
-    
-    int basecolor_texture;
-    int metallic_roughness_texture;
-    int normal_texture;
-};
-
-struct ShaderGlobals
-{
-    glm::mat4 view;
-    glm::mat4 projection;
-    glm::mat4 viewprojection;
 };
 
 std::vector<Mesh> meshes;
@@ -1060,6 +1134,10 @@ int main()
         info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        info.maxLod = VK_LOD_CLAMP_NONE;
+        info.anisotropyEnable = VK_TRUE;
+        info.maxAnisotropy = ctx.physical_device.properties.limits.maxSamplerAnisotropy;
+        LOG_INFO("Setting sampler max anisotropy to %f", info.maxAnisotropy);
         VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &sampler));
     }
 
@@ -1134,6 +1212,7 @@ int main()
             indices.resize(first_index + index_count);
             cgltf_accessor_unpack_indices(p.indices, indices.data() + first_index, sizeof(uint32_t), index_count);
 
+            bool primitive_has_tangents = false;
             for (size_t k = 0; k < p.attributes_count; ++k)
             {
                 const cgltf_attribute& a = p.attributes[k];
@@ -1157,6 +1236,7 @@ int main()
                 }
                 case cgltf_attribute_type_tangent:
                 {
+                    primitive_has_tangents = true;
                     assert(a.data->component_type == cgltf_component_type_r_32f);
                     assert(a.data->type == cgltf_type_vec4); // TODO: Handle other component types and types
                     tangent.resize(first_vertex + a.data->count);
@@ -1188,6 +1268,11 @@ int main()
                     LOG_WARNING("Unused gltf attribute: %s", a.name);
                     break;
                 }
+            }
+
+            if (p.material->normal_texture.texture && !primitive_has_tangents)
+            {
+                LOG_WARNING("Primitive on mesh %s has a normal map but is missing tangents!", m.name ? m.name : "");
             }
         }
 
@@ -1257,6 +1342,7 @@ int main()
     }
 
     std::vector<Material> materials;
+    Buffer materials_buffer;
     { // Load materials
         materials.resize(gltf_data->materials_count);
         
@@ -1274,14 +1360,33 @@ int main()
             m.basecolor_texture = mat.pbr_metallic_roughness.base_color_texture.texture ? cgltf_texture_index(gltf_data, mat.pbr_metallic_roughness.base_color_texture.texture) : -1;
             m.metallic_roughness_texture = mat.pbr_metallic_roughness.metallic_roughness_texture.texture ? cgltf_texture_index(gltf_data, mat.pbr_metallic_roughness.metallic_roughness_texture.texture) : -1;
             m.normal_texture = mat.normal_texture.texture ? cgltf_texture_index(gltf_data, mat.normal_texture.texture) : -1;
+
+            switch (mat.alpha_mode)
+            {
+            case cgltf_alpha_mode_opaque:
+                m.alpha_cutoff = 1.0f;
+                break;
+            case cgltf_alpha_mode_mask:
+                m.alpha_cutoff = mat.alpha_cutoff;
+                break;
+            case cgltf_alpha_mode_blend:
+                LOG_WARNING("Unimplemented alpha mode: Alpha blend");
+                break;
+            }
         }
+
+        BufferDesc desc{};
+        desc.size = sizeof(Material) * materials.size();
+        desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        desc.data = materials.data();
+        materials_buffer = ctx.create_buffer(desc);
     }
 
     std::vector<Texture> textures;
     { // Load textures
         textures.resize(gltf_data->textures_count);
         
-
         for (size_t i = 0; i < gltf_data->textures_count; ++i)
         {
             const cgltf_texture& tex = gltf_data->textures[i];
@@ -1304,8 +1409,6 @@ int main()
                 t.source = stbi_load(path.c_str(), &t.width, &t.height, &comp, 4);
                 assert(t.source);
             }
-
-
         }
 
         if (!ctx.create_textures(textures.data(), textures.size()))
@@ -1329,18 +1432,6 @@ int main()
         desc_write.descriptorCount = textures.size();
         desc_write.pImageInfo = image_info.data();
         vkUpdateDescriptorSets(ctx.device, 1, &desc_write, 0, nullptr);
-        /*
-            VkStructureType                  sType;
-    const void*                      pNext;
-    VkDescriptorSet                  dstSet;
-    uint32_t                         dstBinding;
-    uint32_t                         dstArrayElement;
-    uint32_t                         descriptorCount;
-    VkDescriptorType                 descriptorType;
-    const VkDescriptorImageInfo*     pImageInfo;
-    const VkDescriptorBufferInfo*    pBufferInfo;
-    const VkBufferView*              pTexelBufferView;*/
-
     }
 
     BufferDesc desc{};
@@ -1432,6 +1523,9 @@ int main()
             globals.view = glm::lookAt(camera.position, camera.position + camera.forward, camera.up);
             globals.projection = glm::perspective(camera.fov, (float)window_width / (float)window_height, camera.znear, camera.zfar);
             globals.viewprojection = globals.projection * globals.view;
+            globals.camera_pos = glm::vec4(camera.position, 1.0f);
+            globals.sun_direction = glm::vec4(glm::normalize(glm::vec3(1.0f)), 1.0f);
+            globals.sun_color_and_intensity = glm::vec4(1.0f);
 
             void* mapped;
             vmaMapMemory(ctx.allocator, globals_buffer.allocation, &mapped);
@@ -1496,16 +1590,8 @@ int main()
                     size_t mesh_index = cgltf_mesh_index(gltf_data, node->mesh);
                     const Mesh& mesh = meshes[mesh_index];
 
-                    struct
-                    {
-                        glm::mat4 model;
-                        uint64_t position_buffer;
-                        uint64_t normal_buffer;
-                        uint64_t tangent_buffer;
-                        uint64_t texcoord0_buffer;
-                        uint64_t texcoord1_buffer;
-                        int basecolor_texture;
-                    } pc{};
+                    PushConstantsForward pc{};
+                    static_assert(sizeof(pc) <= 128);
 
                     cgltf_node_transform_world(node, glm::value_ptr(pc.model));
                     pc.position_buffer = ctx.buffer_device_address(mesh.position);
@@ -1517,7 +1603,7 @@ int main()
                     vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
                     for (const auto& primitive : mesh.primitives)
                     {
-                        VkWriteDescriptorSet descriptors[2] = {};
+                        VkWriteDescriptorSet descriptors[3] = {};
 
                         VkDescriptorImageInfo iinfo0{};
                         iinfo0.sampler = sampler;
@@ -1539,7 +1625,19 @@ int main()
                         descriptors[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                         descriptors[1].pBufferInfo = &binfo0;
 
-                        pc.basecolor_texture = materials[primitive.material].basecolor_texture;
+                        VkDescriptorBufferInfo binfo1{};
+                        binfo1.buffer = materials_buffer.buffer;
+                        binfo1.offset = 0;
+                        binfo1.range = VK_WHOLE_SIZE;
+                        descriptors[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        descriptors[2].dstSet = 0;
+                        descriptors[2].dstBinding = 2;
+                        descriptors[2].descriptorCount = 1;
+                        descriptors[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                        descriptors[2].pBufferInfo = &binfo1;
+
+                        pc.material_index = primitive.material;
+
                         vkCmdPushConstants(command_buffer, pipeline_builder.pipeline_create_info.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
                         vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_builder.pipeline_create_info.layout, 0, std::size(descriptors), descriptors);
                         vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
@@ -1570,6 +1668,7 @@ int main()
         vmaDestroyBuffer(ctx.allocator, m.texcoord0.buffer, m.texcoord0.allocation);
         vmaDestroyBuffer(ctx.allocator, m.texcoord1.buffer, m.texcoord1.allocation);
     }
+    vmaDestroyBuffer(ctx.allocator, materials_buffer.buffer, materials_buffer.allocation);
     vmaDestroyBuffer(ctx.allocator, globals_buffer.buffer, globals_buffer.allocation);
     vkDestroySampler(ctx.device, sampler, nullptr);
     for (auto& t : textures)
