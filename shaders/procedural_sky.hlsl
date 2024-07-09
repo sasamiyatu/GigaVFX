@@ -17,6 +17,6 @@ void cs_main( uint3 thread_id : SV_DispatchThreadID )
     float2 uv = float2(thread_id.xy + 0.5) / float2(w, h);
     if (all(saturate(uv) == uv))
     {
-        out_texture[thread_id.xy] = float4(1.0, 0.0, 1.0, 1.0);
+        out_texture[thread_id.xy] = float4(1.0, 1.0, 1.0, 1.0);
     }
 }

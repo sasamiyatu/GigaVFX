@@ -29,6 +29,10 @@ CMRC_DECLARE(embedded_shaders);
 #include "misc.h"
 #include "pipeline.h"
 
+#include "shaders.h"
+
+#include "hot_reload.h"
+
 constexpr uint32_t window_width = 1280;
 constexpr uint32_t window_height = 720;
 
@@ -773,6 +777,8 @@ int main()
 
     bool running = true;
 
+    // Init shader compiler
+    Shaders::init();
 
     VkSampler sampler = VK_NULL_HANDLE;
     {
@@ -792,8 +798,8 @@ int main()
     Texture depth_texture;
     ctx.create_texture(depth_texture, window_width, window_height, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
 
-    GraphicsPipelineBuilder pipeline_builder(ctx.device);
-    Pipeline pipeline = pipeline_builder
+    GraphicsPipelineBuilder pipeline_builder(ctx.device, true);
+    pipeline_builder
         .set_vertex_shader_filepath("forward.hlsl")
         .set_fragment_shader_filepath("forward.hlsl")
         .add_color_attachment(ctx.swapchain.image_format)
@@ -803,13 +809,16 @@ int main()
         .set_depth_test(VK_TRUE)
         .set_depth_write(VK_TRUE)
         .set_depth_compare_op(VK_COMPARE_OP_LESS)
-        .set_descriptor_set_layout(1, ctx.bindless_descriptor_set_layout)
-        .build();
+        .set_descriptor_set_layout(1, ctx.bindless_descriptor_set_layout);
 
-    ComputePipelineBuilder compute_builder(ctx.device);
-    Pipeline procedural_skybox_pipeline = compute_builder
-        .set_shader_filepath("procedural_sky.hlsl")
-        .build();
+    GraphicsPipelineAsset* pipeline = new GraphicsPipelineAsset(pipeline_builder);
+    AssetCatalog::register_asset(pipeline);
+
+    ComputePipelineBuilder compute_builder(ctx.device, true);
+    compute_builder
+        .set_shader_filepath("procedural_sky.hlsl");
+    ComputePipelineAsset* procedural_skybox_pipeline = new ComputePipelineAsset(compute_builder);
+    AssetCatalog::register_asset(procedural_skybox_pipeline);
 
     int x, y, c;
     //float* data = stbi_loadf("data/grace_probe.hdr", &x, &y, &c, 4);
@@ -1109,6 +1118,8 @@ int main()
 
     while (running)
     {
+
+
         VkCommandBuffer command_buffer = ctx.begin_frame();
         Texture& swapchain_texture = ctx.get_swapchain_texture();
 
@@ -1170,6 +1181,18 @@ int main()
         double delta_time = (tick - current_tick) * inv_pfreq;
         current_tick = tick;
 
+        static float hot_reload_timer = 0.0f;
+        hot_reload_timer += delta_time;
+        if (hot_reload_timer > 1.0f)
+        {
+            if (AssetCatalog::check_for_dirty_assets())
+            {
+                LOG_DEBUG("Found dirty assets!");
+                AssetCatalog::reload_dirty_assets();
+            }
+            hot_reload_timer -= 1.0f;
+        }
+
         camera.position += glm::vec3(rotation * glm::vec4(movement, 0.0f)) * (float)delta_time * movement_speed;
 
         {
@@ -1230,8 +1253,8 @@ int main()
             descriptors[1].pImageInfo = &iinfo0;
 
 
-            vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline.layout, 0, std::size(descriptors), descriptors);
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline.pipeline);
+            vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline->pipeline.layout, 0, std::size(descriptors), descriptors);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline->pipeline.pipeline);
             uint32_t dispatch_x = get_golden_dispatch_size(window_width);
             uint32_t dispatch_y = get_golden_dispatch_size(window_height);
             vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
@@ -1266,8 +1289,8 @@ int main()
         VkViewport viewport = {0.0f, (float)window_height, (float)window_width, -(float)window_height, 0.0f, 1.0f};
         vkCmdSetViewport(command_buffer, 0, 1, &viewport);
 
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout, 1, 1, &ctx.bindless_descriptor_set, 0, nullptr);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline.pipeline);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline.layout, 1, 1, &ctx.bindless_descriptor_set, 0, nullptr);
 
         auto render_node = [&](const cgltf_node* node)
             {
@@ -1324,8 +1347,8 @@ int main()
 
                         pc.material_index = primitive.material;
 
-                        vkCmdPushConstants(command_buffer, pipeline_builder.pipeline_create_info.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-                        vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_builder.pipeline_create_info.layout, 0, std::size(descriptors), descriptors);
+                        vkCmdPushConstants(command_buffer, pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+                        vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline.layout, 0, std::size(descriptors), descriptors);
                         vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
                     }
                 }
@@ -1363,21 +1386,21 @@ int main()
         vmaDestroyImage(ctx.allocator, t.image, t.allocation);
     }
     //vkDestroyDescriptorSetLayout(ctx.device, set_layout, nullptr);
-    vkDestroyPipeline(ctx.device, pipeline.pipeline, nullptr);
-    for (uint32_t i = 0; i < pipeline.descriptor_set_count; ++i)
+    vkDestroyPipeline(ctx.device, pipeline->pipeline.pipeline, nullptr);
+    for (uint32_t i = 0; i < pipeline->pipeline.descriptor_set_count; ++i)
     {
-        if (pipeline.set_layouts[i] == ctx.bindless_descriptor_set_layout) continue;
-        vkDestroyDescriptorSetLayout(ctx.device, pipeline.set_layouts[i], nullptr);
+        if (pipeline->pipeline.set_layouts[i] == ctx.bindless_descriptor_set_layout) continue;
+        vkDestroyDescriptorSetLayout(ctx.device, pipeline->pipeline.set_layouts[i], nullptr);
     }
-    vkDestroyPipelineLayout(ctx.device, pipeline.layout, nullptr);
+    vkDestroyPipelineLayout(ctx.device, pipeline->pipeline.layout, nullptr);
 
-    vkDestroyPipeline(ctx.device, procedural_skybox_pipeline.pipeline, nullptr);
-    for (uint32_t i = 0; i < procedural_skybox_pipeline.descriptor_set_count; ++i)
+    vkDestroyPipeline(ctx.device, procedural_skybox_pipeline->pipeline.pipeline, nullptr);
+    for (uint32_t i = 0; i < procedural_skybox_pipeline->pipeline.descriptor_set_count; ++i)
     {
-        if (procedural_skybox_pipeline.set_layouts[i] == ctx.bindless_descriptor_set_layout) continue;
-        vkDestroyDescriptorSetLayout(ctx.device, procedural_skybox_pipeline.set_layouts[i], nullptr);
+        if (procedural_skybox_pipeline->pipeline.set_layouts[i] == ctx.bindless_descriptor_set_layout) continue;
+        vkDestroyDescriptorSetLayout(ctx.device, procedural_skybox_pipeline->pipeline.set_layouts[i], nullptr);
     }
-    vkDestroyPipelineLayout(ctx.device, procedural_skybox_pipeline.layout, nullptr);
+    vkDestroyPipelineLayout(ctx.device, procedural_skybox_pipeline->pipeline.layout, nullptr);
 
     ctx.shutdown();
 

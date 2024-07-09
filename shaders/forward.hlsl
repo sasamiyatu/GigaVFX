@@ -158,7 +158,6 @@ PSOutput fs_main(VSOutput input)
     float3 radiance = (Fr + Fd) * NdotL;
     float3 final_output = linear_to_srgb(radiance);
     output.color = float4(final_output, 1.0);
-    //output.color = basecolor;
 
     return output;
 }

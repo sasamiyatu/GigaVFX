@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Vulkan REQUIRED volk)
+find_package(Vulkan REQUIRED volk dxc)
 find_package(SDL2 REQUIRED)
 
 #===========================================================================================
@@ -56,11 +56,15 @@ cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
 add_executable(gigasticle
     src/cgltf.h
     src/defines.h
+    src/hot_reload.h
+    src/hot_reload.cpp
     src/main.cpp
     src/misc.h
     src/log.h
     src/pipeline.h
     src/pipeline.cpp
+    src/shaders.h
+    src/shaders.cpp
     src/spirv_reflect.c
     src/spirv_reflect.h
     src/spirv_reflect.cpp
@@ -80,7 +84,7 @@ target_link_libraries(gigasticle PUBLIC Shaders::precompiled)
 # End shader stuff
 #===========================================================================================
 
-target_link_libraries(gigasticle PUBLIC SDL2::SDL2 Vulkan::Vulkan Vulkan::volk)
+target_link_libraries(gigasticle PUBLIC SDL2::SDL2 Vulkan::Vulkan Vulkan::volk Vulkan::dxc_lib)
 set_target_properties(
     gigasticle
     PROPERTIES

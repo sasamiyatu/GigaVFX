@@ -13,18 +13,19 @@ struct Pipeline
 
 struct GraphicsPipelineBuilder
 {
+    bool hot_reloadable = false;
     VkDevice device;
     VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
     VkGraphicsPipelineCreateInfo pipeline_create_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
 
     static constexpr uint32_t max_shader_stages = 4;
     VkPipelineShaderStageCreateInfo shader_stage_create_info[max_shader_stages] = {};
-    VkShaderModule shader_modules[max_shader_stages] = {};
 
     struct
     {
         uint32_t* spirv;
         uint32_t size;
+        const char* filepath;
     } shader_sources[max_shader_stages];
 
     VkPipelineVertexInputStateCreateInfo vertex_input_state = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
@@ -49,7 +50,7 @@ struct GraphicsPipelineBuilder
 
     VkDescriptorSetLayout set_layouts[4] = {};
 
-    GraphicsPipelineBuilder(VkDevice dev);
+    GraphicsPipelineBuilder(VkDevice dev, bool enable_shader_hot_reload);
 
     GraphicsPipelineBuilder& add_color_attachment(VkFormat format);
     GraphicsPipelineBuilder& set_depth_format(VkFormat format);
@@ -57,31 +58,30 @@ struct GraphicsPipelineBuilder
     GraphicsPipelineBuilder& set_depth_write(VkBool32 enabled);
     GraphicsPipelineBuilder& set_depth_compare_op(VkCompareOp op);
     GraphicsPipelineBuilder& set_layout(VkPipelineLayout layout);
-    GraphicsPipelineBuilder& set_vertex_shader_spirv(uint32_t* data, size_t size);
-    GraphicsPipelineBuilder& set_fragment_shader_spirv(uint32_t* data, size_t size);
     GraphicsPipelineBuilder& set_cull_mode(VkCullModeFlagBits cull_mode);
     GraphicsPipelineBuilder& set_vertex_shader_filepath(const char* filepath);
     GraphicsPipelineBuilder& set_fragment_shader_filepath(const char* filepath);
-    GraphicsPipelineBuilder& add_shader_stage_spirv(uint32_t* data, size_t size, VkShaderStageFlagBits shader_stage, const char* entry_point);
     GraphicsPipelineBuilder& set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout);
-    Pipeline build();
+    bool build(Pipeline* pipeline);
 };
 
 struct ComputePipelineBuilder
 {
     VkDevice device;
+    bool hot_reloadable;
     VkComputePipelineCreateInfo create_info{};
     struct {
         uint32_t* spirv;
         uint32_t size;
+        const char* filepath;
     } shader_source;
-    VkShaderModule shader_module = VK_NULL_HANDLE;
     static const uint32_t max_descriptor_set_layouts = 4;
     VkDescriptorSetLayout set_layouts[max_descriptor_set_layouts] = { VK_NULL_HANDLE };
 
-    ComputePipelineBuilder& set_shader_spirv(uint32_t* data, size_t size);
     ComputePipelineBuilder& set_shader_filepath(const char* filepath);
-    ComputePipelineBuilder(VkDevice device);
+    ComputePipelineBuilder(VkDevice device, bool enable_shader_hot_reload);
 
-    Pipeline build();
+    bool build(Pipeline* pipeline);
 };
+
+void force_hot_reload_shaders();

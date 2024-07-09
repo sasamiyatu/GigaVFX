@@ -1,6 +1,15 @@
 #include "pipeline.h"
 #include "cmrc/cmrc.hpp"
+#include "shaders.h"
+#include <filesystem>
 CMRC_DECLARE(embedded_shaders);
+#include <optional>
+
+    static uint64_t get_file_timestamp(const std::string& path)
+    {
+        std::filesystem::file_time_type ftime = std::filesystem::last_write_time(std::filesystem::path(path));
+        return ftime.time_since_epoch().count();
+    }
 
 static std::string get_embedded_path(const char* src_path, VkShaderStageFlagBits shader_stage)
 {
@@ -26,21 +35,9 @@ static std::string get_embedded_path(const char* src_path, VkShaderStageFlagBits
     return path;
 }
 
-GraphicsPipelineBuilder::GraphicsPipelineBuilder(VkDevice dev)
+GraphicsPipelineBuilder::GraphicsPipelineBuilder(VkDevice dev, bool enable_shader_hot_reload)
     : device(dev)
 {
-    pipeline_create_info.pNext = &rendering_create_info;
-    pipeline_create_info.pStages = shader_stage_create_info;
-    pipeline_create_info.pVertexInputState = &vertex_input_state;
-    pipeline_create_info.pInputAssemblyState = &input_assembly_state;
-    pipeline_create_info.pTessellationState = &tesselation_state;
-    pipeline_create_info.pViewportState = &viewport_state;
-    pipeline_create_info.pRasterizationState = &rasterization_state;
-    pipeline_create_info.pMultisampleState = &multisample_state;
-    pipeline_create_info.pDepthStencilState = &depth_stencil_state;
-    pipeline_create_info.pColorBlendState = &color_blend_state;
-    pipeline_create_info.pDynamicState = &dynamic_state;
-
     // Set default values
 
     input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -48,22 +45,18 @@ GraphicsPipelineBuilder::GraphicsPipelineBuilder(VkDevice dev)
     viewport_state.viewportCount = 1;
     viewport_state.scissorCount = 1;
 
-    rasterization_state.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterization_state.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterization_state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterization_state.lineWidth = 1.0f;
-
-    multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    color_blend_state.pAttachments = color_blend_attachments;
-
     dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_VIEWPORT;
     dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_SCISSOR;
 
     dynamic_state.dynamicStateCount = dynamic_state_count;
     dynamic_state.pDynamicStates = dynamic_states;
 
-    rendering_create_info.pColorAttachmentFormats = color_attachment_formats;
+    rasterization_state.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterization_state.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterization_state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterization_state.lineWidth = 1.0f;
+
+    multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 }
 
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_color_attachment(VkFormat format)
@@ -113,16 +106,6 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_layout(VkPipelineLayout la
     return *this;
 }
 
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_shader_spirv(uint32_t* data, size_t size)
-{
-    return add_shader_stage_spirv(data, size, VK_SHADER_STAGE_VERTEX_BIT, "vs_main");
-}
-
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_fragment_shader_spirv(uint32_t* data, size_t size)
-{
-    return add_shader_stage_spirv(data, size, VK_SHADER_STAGE_FRAGMENT_BIT, "fs_main");
-}
-
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_cull_mode(VkCullModeFlagBits cull_mode)
 {
     rasterization_state.cullMode = cull_mode;
@@ -130,46 +113,32 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_cull_mode(VkCullModeFlagBi
     return *this;
 }
 
+void add_shader_stage(GraphicsPipelineBuilder& builder, VkShaderStageFlagBits shader_stage, const char* entry_point)
+{
+    uint32_t stage_count = builder.pipeline_create_info.stageCount;
+    assert(stage_count < builder.max_shader_stages);
+
+    VkPipelineShaderStageCreateInfo& stage_info = builder.shader_stage_create_info[stage_count];
+
+    stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stage_info.stage = shader_stage;
+    stage_info.module = VK_NULL_HANDLE;
+    stage_info.pName = entry_point;
+
+    builder.pipeline_create_info.stageCount++;
+}
+
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_shader_filepath(const char* filepath)
 {
-    auto fs = cmrc::embedded_shaders::get_filesystem();
-    std::string path = get_embedded_path(filepath, VK_SHADER_STAGE_VERTEX_BIT);
-    auto file = fs.open(path);
-    assert(file.size() % 4 == 0);
-    return set_vertex_shader_spirv((uint32_t*)file.begin(), file.size());
+    shader_sources[pipeline_create_info.stageCount].filepath = filepath;
+    add_shader_stage(*this, VK_SHADER_STAGE_VERTEX_BIT, "vs_main");
+    return *this;
 }
 
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_fragment_shader_filepath(const char* filepath)
 {
-    auto fs = cmrc::embedded_shaders::get_filesystem();
-    std::string path = get_embedded_path(filepath, VK_SHADER_STAGE_FRAGMENT_BIT);
-    auto file = fs.open(path);
-    assert(file.size() % 4 == 0);
-    return set_fragment_shader_spirv((uint32_t*)file.begin(), file.size());
-}
-
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::add_shader_stage_spirv(uint32_t* data, size_t size, VkShaderStageFlagBits shader_stage, const char* entry_point)
-{
-    uint32_t stage_count = pipeline_create_info.stageCount;
-    assert(stage_count < max_shader_stages);
-
-    VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-    info.codeSize = size;
-    info.pCode = data;
-    VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &shader_modules[stage_count]));
-
-    VkPipelineShaderStageCreateInfo& stage_info = shader_stage_create_info[stage_count];
-
-    stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stage_info.stage = shader_stage;
-    stage_info.module = shader_modules[stage_count];
-    stage_info.pName = entry_point;
-
-    shader_sources[stage_count].spirv = data;
-    shader_sources[stage_count].size = size;
-
-    pipeline_create_info.stageCount++;
-
+    shader_sources[pipeline_create_info.stageCount].filepath = filepath;
+    add_shader_stage(*this, VK_SHADER_STAGE_FRAGMENT_BIT, "fs_main");
     return *this;
 }
 
@@ -179,10 +148,36 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_descriptor_set_layout(uint
     return *this;
 }
 
-Pipeline GraphicsPipelineBuilder::build()
+bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 {
-    Pipeline pp{};
+    Pipeline& pp = *out_pipeline;
 
+    hot_reloadable = true;
+    pipeline_create_info.pNext = &rendering_create_info;
+    pipeline_create_info.pStages = shader_stage_create_info;
+    pipeline_create_info.pVertexInputState = &vertex_input_state;
+    pipeline_create_info.pInputAssemblyState = &input_assembly_state;
+    pipeline_create_info.pTessellationState = &tesselation_state;
+    pipeline_create_info.pViewportState = &viewport_state;
+    pipeline_create_info.pRasterizationState = &rasterization_state;
+    pipeline_create_info.pMultisampleState = &multisample_state;
+    pipeline_create_info.pDepthStencilState = &depth_stencil_state;
+    pipeline_create_info.pColorBlendState = &color_blend_state;
+    pipeline_create_info.pDynamicState = &dynamic_state;
+
+    color_blend_state.pAttachments = color_blend_attachments;
+
+    rendering_create_info.pColorAttachmentFormats = color_attachment_formats;
+
+    for (size_t i = 0; i < pipeline_create_info.stageCount; ++i)
+    {
+        shader_sources[i].spirv = Shaders::load_shader(shader_sources[i].filepath, pipeline_create_info.pStages[i].stage, &shader_sources[i].size);
+        if (!shader_sources[i].spirv) return false;
+        VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        info.codeSize = shader_sources[i].size;
+        info.pCode = shader_sources[i].spirv;
+        VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &shader_stage_create_info[i].module));
+    }
     if (pipeline_create_info.layout == VK_NULL_HANDLE)
     { // Create the layout
         std::vector<VkDescriptorSetLayoutBinding> bindings[4];
@@ -251,53 +246,48 @@ Pipeline GraphicsPipelineBuilder::build()
     VK_CHECK(vkCreateGraphicsPipelines(device, pipeline_cache, 1, &pipeline_create_info, nullptr, &pipeline));
     for (uint32_t i = 0; i < pipeline_create_info.stageCount; ++i)
     {
-        vkDestroyShaderModule(device, shader_modules[i], nullptr);
+        vkDestroyShaderModule(device, shader_stage_create_info[i].module, nullptr);
     }
     pp.pipeline = pipeline;
 
-    return pp;
+    return true;
 }
 
-ComputePipelineBuilder& ComputePipelineBuilder::set_shader_spirv(uint32_t* data, size_t size)
+ComputePipelineBuilder& ComputePipelineBuilder::set_shader_filepath(const char* filepath)
 {
-    VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-    info.codeSize = size;
-    info.pCode = data;
-    VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &shader_module));
+    shader_source.filepath = filepath;
 
     VkPipelineShaderStageCreateInfo stage_info{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
 
     stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stage_info.module = shader_module;
     stage_info.pName = "cs_main";
-
-    shader_source.spirv = data;
-    shader_source.size = size;
 
     create_info.stage = stage_info;
 
     return *this;
 }
 
-ComputePipelineBuilder& ComputePipelineBuilder::set_shader_filepath(const char* filepath)
+ComputePipelineBuilder::ComputePipelineBuilder(VkDevice device, bool enable_shader_hot_reload)
 {
-    auto fs = cmrc::embedded_shaders::get_filesystem();
-    std::string path = get_embedded_path(filepath, VK_SHADER_STAGE_COMPUTE_BIT);
-    auto file = fs.open(path);
-    assert(file.size() % 4 == 0);
-    return set_shader_spirv((uint32_t*)file.begin(), file.size());
-}
-
-ComputePipelineBuilder::ComputePipelineBuilder(VkDevice device)
-{
+    hot_reloadable = true;
     create_info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
     this->device = device;
 }
 
-Pipeline ComputePipelineBuilder::build()
+bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
 {
-    Pipeline pp{};
+    Pipeline& pp = *out_pipeline;
+
+    {
+        shader_source.spirv = Shaders::load_shader(shader_source.filepath, VK_SHADER_STAGE_COMPUTE_BIT, &shader_source.size);
+        if (!shader_source.spirv) return false;
+
+        VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        info.codeSize = shader_source.size;
+        info.pCode = shader_source.spirv;
+        VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &create_info.stage.module));
+    }
 
     if (create_info.layout == VK_NULL_HANDLE)
     {
@@ -362,5 +352,6 @@ Pipeline ComputePipelineBuilder::build()
 
     vkDestroyShaderModule(device, create_info.stage.module, nullptr);
 
-    return pp;
+    return true;
 }
+
