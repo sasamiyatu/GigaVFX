@@ -145,12 +145,16 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_fragment_shader_filepath(c
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout)
 {
     set_layouts[set_index] = layout;
+    set_layout_passed_from_outside[set_index] = true;
     return *this;
 }
 
 bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 {
     Pipeline& pp = *out_pipeline;
+
+    Pipeline old_pipeline = *out_pipeline;
+
 
     hot_reloadable = true;
     pipeline_create_info.pNext = &rendering_create_info;
@@ -178,10 +182,9 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
         info.pCode = shader_sources[i].spirv;
         VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &shader_stage_create_info[i].module));
     }
-    if (pipeline_create_info.layout == VK_NULL_HANDLE)
+    //if (pipeline_create_info.layout == VK_NULL_HANDLE)
     { // Create the layout
         std::vector<VkDescriptorSetLayoutBinding> bindings[4];
-        uint32_t descriptor_set_count = 0;
         uint32_t push_constant_size = 0;
         VkShaderStageFlags pc_stage_flags = 0;
         for (uint32_t i = 0; i < pipeline_create_info.stageCount; ++i)
@@ -189,7 +192,7 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
             SpvReflectShaderModule mod;
             SpvReflectResult result = spvReflectCreateShaderModule(shader_sources[i].size, shader_sources[i].spirv, &mod);
             assert(result == SPV_REFLECT_RESULT_SUCCESS);
-            descriptor_set_count = std::max(mod.descriptor_set_count, descriptor_set_count);
+            descriptor_set_layout_count = std::max(mod.descriptor_set_count, descriptor_set_layout_count);
             uint32_t pc_size = 0;
             for (uint32_t j = 0; j < mod.push_constant_block_count; ++j)
             {
@@ -200,7 +203,7 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
             push_constant_size = std::max(push_constant_size, pc_size);
             for (uint32_t j = 0; j < mod.descriptor_set_count; ++j)
             {
-                if (set_layouts[j] != VK_NULL_HANDLE) continue;
+                if (set_layout_passed_from_outside[j]) continue;
                 SpvReflectDescriptorSet descriptor_set = mod.descriptor_sets[j];
                 bindings[j].resize(std::max(descriptor_set.binding_count, (uint32_t)bindings[j].size()));
                 for (uint32_t k = 0; k < descriptor_set.binding_count; ++k)
@@ -212,13 +215,12 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
                     out_binding.descriptorType = (VkDescriptorType)binding->descriptor_type;
                     out_binding.stageFlags |= mod.shader_stage;
                 }
-
             }
         }
 
-        for (uint32_t i = 0; i < descriptor_set_count; ++i)
+        for (uint32_t i = 0; i < descriptor_set_layout_count; ++i)
         {
-            if (set_layouts[i] != VK_NULL_HANDLE) continue;
+            if (set_layout_passed_from_outside[i]) continue;
             VkDescriptorSetLayoutCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
             info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
             info.bindingCount = bindings[i].size();
@@ -227,7 +229,7 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
         }
 
         VkPipelineLayoutCreateInfo info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-        info.setLayoutCount = descriptor_set_count;
+        info.setLayoutCount = descriptor_set_layout_count;
         info.pSetLayouts = set_layouts;
         VkPushConstantRange range{};
         range.stageFlags = pc_stage_flags;
@@ -238,20 +240,37 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
         VK_CHECK(vkCreatePipelineLayout(device, &info, nullptr, &layout));
         pipeline_create_info.layout = layout;
         pp.layout = layout;
-        pp.descriptor_set_count = descriptor_set_count;
-        memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * descriptor_set_count);
+        pp.descriptor_set_count = descriptor_set_layout_count;
+        memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * descriptor_set_layout_count);
     }
 
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateGraphicsPipelines(device, pipeline_cache, 1, &pipeline_create_info, nullptr, &pipeline));
+    VK_CHECK(vkCreateGraphicsPipelines(device, pipeline_cache, 1, &pipeline_create_info, nullptr, &pp.pipeline));
+
+    destroy_resources(old_pipeline);
+
     for (uint32_t i = 0; i < pipeline_create_info.stageCount; ++i)
     {
         vkDestroyShaderModule(device, shader_stage_create_info[i].module, nullptr);
     }
-    pp.pipeline = pipeline;
 
     return true;
 }
+
+void GraphicsPipelineBuilder::destroy_resources(Pipeline& pipeline)
+{
+    for (uint32_t i = 0; i < 4; ++i)
+    {
+        if (!set_layout_passed_from_outside[i] && pipeline.set_layouts[i] != VK_NULL_HANDLE)
+            vkDestroyDescriptorSetLayout(device, pipeline.set_layouts[i], nullptr);
+    }
+
+    if (pipeline.layout != VK_NULL_HANDLE)
+        vkDestroyPipelineLayout(device, pipeline.layout, nullptr);
+
+    if (pipeline.pipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(device, pipeline.pipeline, nullptr);
+}
+
 
 ComputePipelineBuilder& ComputePipelineBuilder::set_shader_filepath(const char* filepath)
 {
@@ -278,6 +297,7 @@ ComputePipelineBuilder::ComputePipelineBuilder(VkDevice device, bool enable_shad
 bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
 {
     Pipeline& pp = *out_pipeline;
+    Pipeline old_pipeline = *out_pipeline;
 
     {
         shader_source.spirv = Shaders::load_shader(shader_source.filepath, VK_SHADER_STAGE_COMPUTE_BIT, &shader_source.size);
@@ -289,7 +309,7 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
         VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &create_info.stage.module));
     }
 
-    if (create_info.layout == VK_NULL_HANDLE)
+    //if (create_info.layout == VK_NULL_HANDLE)
     {
         VkShaderStageFlags pc_stage_flags = 0;
         uint32_t pc_size = 0;
@@ -297,7 +317,7 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
         SpvReflectShaderModule mod;
         SpvReflectResult result = spvReflectCreateShaderModule(shader_source.size, shader_source.spirv, &mod);
         assert(result == SPV_REFLECT_RESULT_SUCCESS);
-        uint32_t descriptor_set_count = mod.descriptor_set_count;
+        descriptor_set_layout_count = mod.descriptor_set_count;
         for (uint32_t j = 0; j < mod.push_constant_block_count; ++j)
         {
             pc_size += mod.push_constant_blocks[j].size;
@@ -307,7 +327,7 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
         std::vector<VkDescriptorSetLayoutBinding> bindings[4];
         for (uint32_t j = 0; j < mod.descriptor_set_count; ++j)
         {
-            if (set_layouts[j] != VK_NULL_HANDLE) continue;
+            if (set_layout_passed_from_outside[j]) continue;
             SpvReflectDescriptorSet descriptor_set = mod.descriptor_sets[j];
             bindings[j].resize(std::max(descriptor_set.binding_count, (uint32_t)bindings[j].size()));
             for (uint32_t k = 0; k < descriptor_set.binding_count; ++k)
@@ -321,9 +341,9 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
             }
         }
 
-        for (uint32_t i = 0; i < descriptor_set_count; ++i)
+        for (uint32_t i = 0; i < descriptor_set_layout_count; ++i)
         {
-            if (set_layouts[i] != VK_NULL_HANDLE) continue;
+            if (set_layout_passed_from_outside[i]) continue;
             VkDescriptorSetLayoutCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
             info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
             info.bindingCount = bindings[i].size();
@@ -331,27 +351,44 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
             VK_CHECK(vkCreateDescriptorSetLayout(device, &info, nullptr, &set_layouts[i]));
         }
 
+
+        VkPipelineLayout layout = VK_NULL_HANDLE;
         VkPipelineLayoutCreateInfo info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-        info.setLayoutCount = descriptor_set_count;
+        info.setLayoutCount = descriptor_set_layout_count;
         info.pSetLayouts = set_layouts;
         VkPushConstantRange range{};
         range.stageFlags = pc_stage_flags;
         range.size = pc_size;
         info.pPushConstantRanges = &range;
         info.pushConstantRangeCount = pc_size != 0 ? 1 : 0;
-        VkPipelineLayout layout = VK_NULL_HANDLE;
         VK_CHECK(vkCreatePipelineLayout(device, &info, nullptr, &layout));
         create_info.layout = layout;
         pp.layout = layout;
-        pp.descriptor_set_count = descriptor_set_count;
-        memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * descriptor_set_count);
-
+        memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * descriptor_set_layout_count);
     }
 
     VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &create_info, nullptr, &pp.pipeline));
 
+    destroy_resources(old_pipeline);
+
     vkDestroyShaderModule(device, create_info.stage.module, nullptr);
 
     return true;
+}
+
+void ComputePipelineBuilder::destroy_resources(Pipeline& pipeline)
+{
+    for (uint32_t i = 0; i < 4; ++i)
+    {
+        if (!set_layout_passed_from_outside[i] && pipeline.set_layouts[i] != VK_NULL_HANDLE)
+            vkDestroyDescriptorSetLayout(device, pipeline.set_layouts[i], nullptr);
+    }
+
+    if (pipeline.layout != VK_NULL_HANDLE)
+        vkDestroyPipelineLayout(device, pipeline.layout, nullptr);
+
+    if (pipeline.pipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(device, pipeline.pipeline, nullptr);
+
 }
 

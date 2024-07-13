@@ -1,6 +1,7 @@
 #include "pbr.hlsli"
 #include "shared.h"
 #include "math.hlsli"
+#include "misc.hlsli"
 
 #define BINDLESS_DESCRIPTOR_SET_INDEX 1
 
@@ -22,34 +23,15 @@ struct VSOutput
 
 [[vk::binding(0)]] SamplerState bilinear_sampler;
 [[vk::binding(1)]] cbuffer globals {
-    float4x4 view;
-    float4x4 projection;
-    float4x4 viewprojection;
-    float4 camera_pos;
-    float4 sun_direction;
-    float4 sun_color_and_intensity;
+    ShaderGlobals globals;
 }
 [[vk::binding(2)]] StructuredBuffer<Material> materials;
+[[vk::binding(3)]] Texture2D shadowmap_texture;
 
 [[vk::push_constant]]
 PushConstantsForward push_constants;
 
-float3 linear_to_srgb(float3 color)
-{
-    float3 cutoff = color < 0.0031308;
-    float3 higher = 1.055*pow(color, 1.0/2.4) - 0.055;
-	float3 lower = color * 12.92;
-    return select(cutoff, lower, higher);
-}
 
-float3 srgb_to_linear(float3 color)
-{
-    float3 cutoff = color < 0.04045;
-	float3 higher = pow((color + 0.055)/1.055, 2.4);
-	float3 lower = color/12.92;
-
-    return select(cutoff, lower, higher);
-}
 
 VSOutput vs_main(VSInput input)
 {
@@ -57,7 +39,7 @@ VSOutput vs_main(VSInput input)
     float3 pos = vk::RawBufferLoad<float3>(push_constants.position_buffer + input.vertex_id * 12);
     float3 world_pos = mul(push_constants.model, float4(pos, 1.0)).xyz;
     output.world_position = world_pos;
-    output.position = mul(viewprojection, float4(world_pos, 1.0));
+    output.position = mul(globals.viewprojection, float4(world_pos, 1.0));
     if (push_constants.normal_buffer)
         output.normal = vk::RawBufferLoad<float3>(push_constants.normal_buffer + input.vertex_id * 12);
     if (push_constants.texcoord0_buffer)
@@ -135,9 +117,9 @@ PSOutput fs_main(VSOutput input)
     if (material_context.basecolor.a < material.alpha_cutoff)
         discard;
 
-    float3 V = normalize(camera_pos.xyz - input.world_position);
+    float3 V = normalize(globals.camera_pos.xyz - input.world_position);
     float3 N = material_context.shading_normal;
-    float3 L = normalize(sun_direction.xyz);
+    float3 L = normalize(globals.sun_direction.xyz);
 
     float NdotV = abs(dot(N, V)) + 1e-5f;
     float3 H = normalize(V + L);
@@ -155,7 +137,20 @@ PSOutput fs_main(VSOutput input)
     // Diffuse BRDF
     float3 Fd = material_context.basecolor.rgb / PI * (1.0 - F);
 
-    float3 radiance = (Fr + Fd) * NdotL;
+    float shadow = 1.0;
+    {
+        float4 shadow_space = mul(globals.shadow_view_projection, float4(input.world_position, 1.0));
+        shadow_space /= shadow_space.w;
+        float2 shadow_uv = shadow_space.xy * 0.5 + 0.5;
+        shadow_uv.y = 1.0 - shadow_uv.y;
+        //if (all(saturate(shadow_uv) == shadow_uv))
+        {
+            float shadow_depth = shadowmap_texture.Sample(bilinear_sampler, shadow_uv).r;
+            if (shadow_depth < shadow_space.z - 0.001) shadow = 0.1;
+        }
+    }
+
+    float3 radiance = (Fr + Fd) * NdotL * shadow;
     float3 final_output = linear_to_srgb(radiance);
     output.color = float4(final_output, 1.0);
 

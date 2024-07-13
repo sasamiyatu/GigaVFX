@@ -39,8 +39,12 @@ struct PushConstantsForward
 struct ShaderGlobals
 {
     float4x4 view;
+    float4x4 view_inverse;
     float4x4 projection;
     float4x4 viewprojection;
+    float4x4 shadow_view;
+    float4x4 shadow_projection;
+    float4x4 shadow_view_projection;
     float4 camera_pos;
     float4 sun_direction;
     float4 sun_color_and_intensity;

@@ -48,7 +48,11 @@ struct GraphicsPipelineBuilder
     VkFormat color_attachment_formats[max_color_blend_attachments] = {};
     uint32_t color_attachment_count = 0;
 
-    VkDescriptorSetLayout set_layouts[4] = {};
+    static const uint32_t max_descriptor_set_layouts = 4;
+
+    VkDescriptorSetLayout set_layouts[max_descriptor_set_layouts] = {};
+    bool set_layout_passed_from_outside[max_descriptor_set_layouts] = { false };
+    uint32_t descriptor_set_layout_count = 0;
 
     GraphicsPipelineBuilder(VkDevice dev, bool enable_shader_hot_reload);
 
@@ -62,7 +66,9 @@ struct GraphicsPipelineBuilder
     GraphicsPipelineBuilder& set_vertex_shader_filepath(const char* filepath);
     GraphicsPipelineBuilder& set_fragment_shader_filepath(const char* filepath);
     GraphicsPipelineBuilder& set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout);
+
     bool build(Pipeline* pipeline);
+    void destroy_resources(Pipeline& pipeline);
 };
 
 struct ComputePipelineBuilder
@@ -76,12 +82,15 @@ struct ComputePipelineBuilder
         const char* filepath;
     } shader_source;
     static const uint32_t max_descriptor_set_layouts = 4;
-    VkDescriptorSetLayout set_layouts[max_descriptor_set_layouts] = { VK_NULL_HANDLE };
+
+    VkDescriptorSetLayout set_layouts[max_descriptor_set_layouts] = {};
+    bool set_layout_passed_from_outside[max_descriptor_set_layouts] = { false };
+    uint32_t descriptor_set_layout_count = 0;
 
     ComputePipelineBuilder& set_shader_filepath(const char* filepath);
     ComputePipelineBuilder(VkDevice device, bool enable_shader_hot_reload);
 
     bool build(Pipeline* pipeline);
+    void destroy_resources(Pipeline& pipeline);
 };
 
-void force_hot_reload_shaders();

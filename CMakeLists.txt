@@ -73,6 +73,22 @@ add_executable(gigasticle
     src/VkBootstrap.cpp
     src/VkBootstrapDispatch.h
     src/vk_helpers.h
+
+    src/imgui/imconfig.h
+    src/imgui/imgui_internal.h
+    src/imgui/imstb_truetype.h
+    src/imgui/imstb_textedit.h
+    src/imgui/imstb_rectpack.h
+    src/imgui/imgui.h
+    src/imgui/imgui.cpp
+    src/imgui/imgui_widgets.cpp
+    src/imgui/imgui_tables.cpp
+    src/imgui/imgui_impl_vulkan.h
+    src/imgui/imgui_impl_vulkan.cpp
+    src/imgui/imgui_impl_sdl2.h
+    src/imgui/imgui_impl_sdl2.cpp
+    src/imgui/imgui_draw.cpp
+    src/imgui/imgui_demo.cpp
 )
 
 target_include_directories(gigasticle PUBLIC ${Vulkan_INCLUDE_DIRS})

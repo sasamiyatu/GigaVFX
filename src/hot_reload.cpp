@@ -73,7 +73,7 @@ bool AssetCatalog::check_for_dirty_assets()
 			LOG_INFO("Asset %s has been updated!", filepath.string().c_str());
 		}
 
-		any_dirty = asset.dirty;
+		any_dirty = any_dirty || asset.dirty;
 	}
 	return any_dirty;
 }
@@ -96,6 +96,7 @@ bool AssetCatalog::reload_dirty_assets()
 			else
 			{
 				LOG_ERROR("Failed to reload asset %s", a.asset->get_filepath().string().c_str());
+				all_success = false;
 			}
 		}
 	}

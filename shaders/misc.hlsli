@@ -1,0 +1,18 @@
+#pragma once
+
+float3 linear_to_srgb(float3 color)
+{
+    float3 cutoff = color < 0.0031308;
+    float3 higher = 1.055*pow(color, 1.0/2.4) - 0.055;
+	float3 lower = color * 12.92;
+    return select(cutoff, lower, higher);
+}
+
+float3 srgb_to_linear(float3 color)
+{
+    float3 cutoff = color < 0.04045;
+	float3 higher = pow((color + 0.055)/1.055, 2.4);
+	float3 lower = color/12.92;
+
+    return select(cutoff, lower, higher);
+}

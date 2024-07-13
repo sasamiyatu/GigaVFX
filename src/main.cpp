@@ -33,6 +33,10 @@ CMRC_DECLARE(embedded_shaders);
 
 #include "hot_reload.h"
 
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_sdl2.h"
+#include "imgui/imgui_impl_vulkan.h"
+
 constexpr uint32_t window_width = 1280;
 constexpr uint32_t window_height = 720;
 
@@ -118,6 +122,8 @@ struct Context
 
     VkCommandPool transfer_command_pool;
     VkCommandBuffer transfer_command_buffer;
+
+    VkDescriptorPool imgui_descriptor_pool;
 
     VkDescriptorPool bindless_descriptor_pool;
     VkDescriptorSetLayout bindless_descriptor_set_layout;
@@ -320,6 +326,19 @@ struct Context
             VK_CHECK(vkCreateDescriptorPool(device, &info, nullptr, &bindless_descriptor_pool));
         }
 
+        { // Imgui descriptor pool
+            VkDescriptorPoolSize pool_sizes[] = {
+                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 10},
+            };
+
+            VkDescriptorPoolCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+            info.maxSets = MAX_BINDLESS_RESOURCES * std::size(pool_sizes);
+            info.poolSizeCount = (uint32_t)std::size(pool_sizes);
+            info.pPoolSizes = pool_sizes;
+            VK_CHECK(vkCreateDescriptorPool(device, &info, nullptr, &imgui_descriptor_pool));
+        }
+
         { // Bindless descriptor set layout
             VkDescriptorSetLayoutBinding bindings[2];
             VkDescriptorSetLayoutBinding& image_sampler_binding = bindings[0];
@@ -364,6 +383,10 @@ struct Context
     {
         VK_CHECK(vkDeviceWaitIdle(device));
 
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplSDL2_Shutdown();
+        ImGui::DestroyContext();
+
         vmaDestroyAllocator(allocator);
 
         for (auto& t : swapchain_textures)
@@ -371,6 +394,7 @@ struct Context
             vkDestroyImageView(device, t.view, nullptr);
         }
         vkDestroyDescriptorPool(device, bindless_descriptor_pool, nullptr);
+        vkDestroyDescriptorPool(device, imgui_descriptor_pool, nullptr);
         vkDestroyDescriptorSetLayout(device, bindless_descriptor_set_layout, nullptr);
         for (uint32_t i = 0; i < frames_in_flight; ++i)
         {
@@ -771,10 +795,83 @@ void traverse_tree(const cgltf_node* node, F&& f)
     }
 }
 
+bool init_imgui()
+{
+    ImGui_ImplVulkan_InitInfo info{};
+    /*// Initialization data, for ImGui_ImplVulkan_Init()
+// - VkDescriptorPool should be created with VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+//   and must contain a pool size large enough to hold an ImGui VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER descriptor.
+// - When using dynamic rendering, set UseDynamicRendering=true and fill PipelineRenderingCreateInfo structure.
+// [Please zero-clear before use!]
+    struct ImGui_ImplVulkan_InitInfo
+    {
+        VkInstance                      Instance;
+        VkPhysicalDevice                PhysicalDevice;
+        VkDevice                        Device;
+        uint32_t                        QueueFamily;
+        VkQueue                         Queue;
+        VkDescriptorPool                DescriptorPool;               // See requirements in note above
+        VkRenderPass                    RenderPass;                   // Ignored if using dynamic rendering
+        uint32_t                        MinImageCount;                // >= 2
+        uint32_t                        ImageCount;                   // >= MinImageCount
+        VkSampleCountFlagBits           MSAASamples;                  // 0 defaults to VK_SAMPLE_COUNT_1_BIT
+
+        // (Optional)
+        VkPipelineCache                 PipelineCache;
+        uint32_t                        Subpass;
+
+        // (Optional) Dynamic Rendering
+        // Need to explicitly enable VK_KHR_dynamic_rendering extension to use this, even for Vulkan 1.3.
+        bool                            UseDynamicRendering;
+#ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
+        VkPipelineRenderingCreateInfoKHR PipelineRenderingCreateInfo;
+#endif
+
+        // (Optional) Allocation, Debugging
+        const VkAllocationCallbacks* Allocator;
+        void                            (*CheckVkResultFn)(VkResult err);
+        VkDeviceSize                    MinAllocationSize;      // Minimum allocation size. Set to 1024*1024 to satisfy zealous best practices validation layer and waste a little memory.
+    }*/
+    info.Instance = ctx.instance;
+    info.PhysicalDevice = ctx.physical_device;
+    info.Device = ctx.device;
+    info.QueueFamily = ctx.graphics_queue_family_index;
+    info.Queue = ctx.graphics_queue;
+    info.DescriptorPool = ctx.imgui_descriptor_pool;
+    info.MinImageCount = ctx.swapchain.requested_min_image_count;
+    info.ImageCount = ctx.swapchain.image_count;
+    info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    info.UseDynamicRendering = true;
+    VkFormat color_attachment_format = ctx.swapchain.image_format;
+    info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &color_attachment_format;
+    info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+    info.PipelineRenderingCreateInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+
+    ImGui_ImplSDL2_InitForVulkan(ctx.window);
+
+    ImGui_ImplVulkan_LoadFunctions([](const char* function_name, void*) { return vkGetInstanceProcAddr(ctx.instance, function_name); });
+
+    bool success = ImGui_ImplVulkan_Init(&info);
+    if (!success)
+    {
+        LOG_ERROR("Failed to initialize ImGui!");
+        exit(1);
+    }
+    return success;
+}
+
 int main()
 {
     ctx.init();
 
+    init_imgui();
     bool running = true;
 
     // Init shader compiler
@@ -798,12 +895,14 @@ int main()
     Texture depth_texture;
     ctx.create_texture(depth_texture, window_width, window_height, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
 
+    Texture shadowmap_texture;
+    ctx.create_texture(shadowmap_texture, 2048, 2048, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
     GraphicsPipelineBuilder pipeline_builder(ctx.device, true);
     pipeline_builder
         .set_vertex_shader_filepath("forward.hlsl")
         .set_fragment_shader_filepath("forward.hlsl")
         .add_color_attachment(ctx.swapchain.image_format)
-        //.set_layout(pipeline_layout)
         .set_cull_mode(VK_CULL_MODE_NONE)
         .set_depth_format(VK_FORMAT_D32_SFLOAT)
         .set_depth_test(VK_TRUE)
@@ -813,6 +912,20 @@ int main()
 
     GraphicsPipelineAsset* pipeline = new GraphicsPipelineAsset(pipeline_builder);
     AssetCatalog::register_asset(pipeline);
+
+    GraphicsPipelineBuilder shadowmap_builder(ctx.device, true);
+    shadowmap_builder
+        .set_vertex_shader_filepath("shadowmap.hlsl")
+        .set_fragment_shader_filepath("shadowmap.hlsl")
+        .set_cull_mode(VK_CULL_MODE_NONE)
+        .set_depth_format(VK_FORMAT_D32_SFLOAT)
+        .set_depth_test(VK_TRUE)
+        .set_depth_write(VK_TRUE)
+        .set_depth_compare_op(VK_COMPARE_OP_LESS)
+        .set_descriptor_set_layout(1, ctx.bindless_descriptor_set_layout);
+
+    GraphicsPipelineAsset* shadowmap_pipeline = new GraphicsPipelineAsset(shadowmap_builder);
+    AssetCatalog::register_asset(shadowmap_pipeline);
 
     ComputePipelineBuilder compute_builder(ctx.device, true);
     compute_builder
@@ -1112,20 +1225,24 @@ int main()
     uint64_t start_tick = SDL_GetPerformanceCounter();
     uint64_t current_tick = start_tick;
 
-    SDL_SetRelativeMouseMode(SDL_TRUE);
-
     float movement_speed = 1.0f;
+
+    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    ImGuiIO& io = ImGui::GetIO();
 
     while (running)
     {
-
-
         VkCommandBuffer command_buffer = ctx.begin_frame();
         Texture& swapchain_texture = ctx.get_swapchain_texture();
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplSDL2_NewFrame();
+        ImGui::NewFrame();
 
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
+            ImGui_ImplSDL2_ProcessEvent(&e);
             switch (e.type)
             {
             case SDL_QUIT:
@@ -1134,6 +1251,8 @@ int main()
             case SDL_KEYDOWN:
             case SDL_KEYUP:
             {
+                if (io.WantCaptureKeyboard) break;
+
                 switch (e.key.keysym.scancode)
                 {
                 case SDL_SCANCODE_ESCAPE:
@@ -1142,11 +1261,40 @@ int main()
                 }
             } break;
             case SDL_MOUSEWHEEL:
+                if (io.WantCaptureMouse) break;
                 movement_speed += e.wheel.y * 0.1f;
+                break;
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP:
+                if (io.WantCaptureMouse) break;
+                if (e.button.button == SDL_BUTTON_LEFT)
+                    SDL_SetRelativeMouseMode(e.type == SDL_MOUSEBUTTONDOWN ? SDL_TRUE : SDL_FALSE);
                 break;
             default:
                 break;
             }
+        }
+
+        // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
+        {
+
+            static float f = 0.0f;
+            static int counter = 0;
+
+            ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
+
+            ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
+
+            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
+
+            if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
+                counter++;
+            ImGui::SameLine();
+            ImGui::Text("counter = %d", counter);
+
+            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+            ImGui::End();
         }
 
         movement_speed = std::max(movement_speed, 0.0f);
@@ -1155,14 +1303,17 @@ int main()
         const uint8_t* keyboard = SDL_GetKeyboardState(&numkeys);
 
         int mousex, mousey;
-        SDL_GetRelativeMouseState(&mousex, &mousey);
+        uint32_t mouse_buttons = SDL_GetRelativeMouseState(&mousex, &mousey);
 
         constexpr float mouse_sensitivity = 0.1f;
-        yaw -= mousex * mouse_sensitivity;
-        pitch += mousey * mouse_sensitivity;
+        if (!io.WantCaptureMouse && (mouse_buttons & SDL_BUTTON_LMASK))
+        {
+            yaw -= mousex * mouse_sensitivity;
+            pitch += mousey * mouse_sensitivity;
 
-        if (glm::abs(yaw) > 180.0f) yaw -= glm::sign(yaw) * 360.0f;
-        if (glm::abs(pitch) > 180.0f) pitch -= glm::sign(pitch) * 360.0f;
+            if (glm::abs(yaw) > 180.0f) yaw -= glm::sign(yaw) * 360.0f;
+            if (glm::abs(pitch) > 180.0f) pitch -= glm::sign(pitch) * 360.0f;
+        }
 
         glm::mat4 rotation = glm::yawPitchRoll(glm::radians(yaw), glm::radians(pitch), 0.0f);
         camera.forward = -rotation[2];
@@ -1187,8 +1338,11 @@ int main()
         {
             if (AssetCatalog::check_for_dirty_assets())
             {
-                LOG_DEBUG("Found dirty assets!");
-                AssetCatalog::reload_dirty_assets();
+                VK_CHECK(vkDeviceWaitIdle(ctx.device));
+                while (!AssetCatalog::reload_dirty_assets())
+                {
+                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Shader compilation error", "Shader compilation failed!\nRetry?", ctx.window);
+                }
             }
             hot_reload_timer -= 1.0f;
         }
@@ -1198,11 +1352,15 @@ int main()
         {
             ShaderGlobals globals{};
             globals.view = glm::lookAt(camera.position, camera.position + camera.forward, camera.up);
+            globals.view_inverse = glm::inverse(globals.view);
             globals.projection = glm::perspective(camera.fov, (float)window_width / (float)window_height, camera.znear, camera.zfar);
             globals.viewprojection = globals.projection * globals.view;
             globals.camera_pos = glm::vec4(camera.position, 1.0f);
             globals.sun_direction = glm::vec4(glm::normalize(glm::vec3(1.0f)), 1.0f);
             globals.sun_color_and_intensity = glm::vec4(1.0f);
+            globals.shadow_view = glm::lookAt(glm::vec3(globals.sun_direction) * 30.0f, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            globals.shadow_projection = glm::ortho(-30.0f, 30.0f, -30.0f, 30.0f, 0.1f, 100.0f);
+            globals.shadow_view_projection = globals.shadow_projection * globals.shadow_view;
 
             void* mapped;
             vmaMapMemory(ctx.allocator, globals_buffer.allocation, &mapped);
@@ -1252,13 +1410,129 @@ int main()
             descriptors[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             descriptors[1].pImageInfo = &iinfo0;
 
-
             vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline->pipeline.layout, 0, std::size(descriptors), descriptors);
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline->pipeline.pipeline);
             uint32_t dispatch_x = get_golden_dispatch_size(window_width);
             uint32_t dispatch_y = get_golden_dispatch_size(window_height);
             vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
         }
+
+        { // Shadowmap
+
+            VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                0,
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                0,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_GENERAL,
+                shadowmap_texture.image,
+                VK_IMAGE_ASPECT_DEPTH_BIT
+            );
+
+            VkDependencyInfo dep_info{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            dep_info.imageMemoryBarrierCount = 1;
+            dep_info.pImageMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(command_buffer, &dep_info);
+
+            VkRenderingAttachmentInfo depth_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            depth_info.imageView = shadowmap_texture.view;
+            depth_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            depth_info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            depth_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            depth_info.clearValue.depthStencil.depth = 1.0f;
+
+            VkRenderingInfo rendering_info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+            rendering_info.renderArea = { {0, 0}, {2048, 2048} };
+            rendering_info.layerCount = 1;
+            rendering_info.viewMask = 0;
+            rendering_info.pDepthAttachment = &depth_info;
+
+            VkRect2D scissor = { {0, 0}, {2048, 2048} };
+            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+            VkViewport viewport = { 0.0f, (float)2048, (float)2048, -(float)2048, 0.0f, 1.0f };
+            vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+            vkCmdBeginRendering(command_buffer, &rendering_info);
+
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowmap_pipeline->pipeline.pipeline);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowmap_pipeline->pipeline.layout, 1, 1, &ctx.bindless_descriptor_set, 0, nullptr);
+
+
+            auto render_node = [&](const cgltf_node* node)
+                {
+                    if (node->mesh)
+                    {
+                        size_t mesh_index = cgltf_mesh_index(gltf_data, node->mesh);
+                        const Mesh& mesh = meshes[mesh_index];
+
+                        PushConstantsForward pc{};
+                        static_assert(sizeof(pc) <= 128);
+
+                        cgltf_node_transform_world(node, glm::value_ptr(pc.model));
+                        pc.position_buffer = ctx.buffer_device_address(mesh.position);
+                        if (mesh.normal) pc.normal_buffer = ctx.buffer_device_address(mesh.normal);
+                        if (mesh.tangent) pc.tangent_buffer = ctx.buffer_device_address(mesh.tangent);
+                        if (mesh.texcoord0) pc.texcoord0_buffer = ctx.buffer_device_address(mesh.texcoord0);
+                        if (mesh.texcoord1) pc.texcoord1_buffer = ctx.buffer_device_address(mesh.texcoord1);
+
+                        vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+                        for (const auto& primitive : mesh.primitives)
+                        {
+                            VkWriteDescriptorSet descriptors[3] = {};
+
+                            VkDescriptorImageInfo iinfo0{};
+                            iinfo0.sampler = sampler;
+                            descriptors[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                            descriptors[0].dstSet = 0;
+                            descriptors[0].dstBinding = 0;
+                            descriptors[0].descriptorCount = 1;
+                            descriptors[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+                            descriptors[0].pImageInfo = &iinfo0;
+
+                            VkDescriptorBufferInfo binfo0{};
+                            binfo0.buffer = globals_buffer.buffer;
+                            binfo0.offset = 0;
+                            binfo0.range = VK_WHOLE_SIZE;
+                            descriptors[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                            descriptors[1].dstSet = 0;
+                            descriptors[1].dstBinding = 1;
+                            descriptors[1].descriptorCount = 1;
+                            descriptors[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                            descriptors[1].pBufferInfo = &binfo0;
+
+                            VkDescriptorBufferInfo binfo1{};
+                            binfo1.buffer = materials_buffer.buffer;
+                            binfo1.offset = 0;
+                            binfo1.range = VK_WHOLE_SIZE;
+                            descriptors[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                            descriptors[2].dstSet = 0;
+                            descriptors[2].dstBinding = 2;
+                            descriptors[2].descriptorCount = 1;
+                            descriptors[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                            descriptors[2].pBufferInfo = &binfo1;
+
+
+
+                            pc.material_index = primitive.material;
+
+                            vkCmdPushConstants(command_buffer, shadowmap_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+                            vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowmap_pipeline->pipeline.layout, 0, std::size(descriptors), descriptors);
+                            vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
+                        }
+                    }
+                };
+
+            const cgltf_scene* scene = gltf_data->scene;
+            for (size_t i = 0; i < scene->nodes_count; ++i)
+            {
+                traverse_tree(scene->nodes[i], render_node);
+            }
+
+            vkCmdEndRendering(command_buffer);
+
+        }
+
 
         VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
         color_info.imageView = swapchain_texture.view;
@@ -1312,7 +1586,7 @@ int main()
                     vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
                     for (const auto& primitive : mesh.primitives)
                     {
-                        VkWriteDescriptorSet descriptors[3] = {};
+                        VkWriteDescriptorSet descriptors[4] = {};
 
                         VkDescriptorImageInfo iinfo0{};
                         iinfo0.sampler = sampler;
@@ -1345,6 +1619,16 @@ int main()
                         descriptors[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                         descriptors[2].pBufferInfo = &binfo1;
 
+                        VkDescriptorImageInfo iinfo1{};
+                        iinfo1.imageView = shadowmap_texture.view;
+                        iinfo1.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                        descriptors[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        descriptors[3].dstSet = 0;
+                        descriptors[3].dstBinding = 3;
+                        descriptors[3].descriptorCount = 1;
+                        descriptors[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                        descriptors[3].pImageInfo = &iinfo1;
+
                         pc.material_index = primitive.material;
 
                         vkCmdPushConstants(command_buffer, pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
@@ -1360,12 +1644,23 @@ int main()
             traverse_tree(scene->nodes[i], render_node);
         }
 
+        {
+            // ImGui rendering
+            ImGui::Render();
+            ImDrawData* draw_data = ImGui::GetDrawData();
+
+            // Record dear imgui primitives into command buffer
+            ImGui_ImplVulkan_RenderDrawData(draw_data, command_buffer);
+        }
+
         vkCmdEndRendering(command_buffer);
 
         ctx.end_frame(command_buffer);
     }
 
     vkDeviceWaitIdle(ctx.device);
+    vmaDestroyImage(ctx.allocator, shadowmap_texture.image, shadowmap_texture.allocation);
+    vkDestroyImageView(ctx.device, shadowmap_texture.view, nullptr);
     vmaDestroyImage(ctx.allocator, depth_texture.image, depth_texture.allocation);
     vkDestroyImageView(ctx.device, depth_texture.view, nullptr);
     for (auto& m : meshes)
@@ -1386,21 +1681,9 @@ int main()
         vmaDestroyImage(ctx.allocator, t.image, t.allocation);
     }
     //vkDestroyDescriptorSetLayout(ctx.device, set_layout, nullptr);
-    vkDestroyPipeline(ctx.device, pipeline->pipeline.pipeline, nullptr);
-    for (uint32_t i = 0; i < pipeline->pipeline.descriptor_set_count; ++i)
-    {
-        if (pipeline->pipeline.set_layouts[i] == ctx.bindless_descriptor_set_layout) continue;
-        vkDestroyDescriptorSetLayout(ctx.device, pipeline->pipeline.set_layouts[i], nullptr);
-    }
-    vkDestroyPipelineLayout(ctx.device, pipeline->pipeline.layout, nullptr);
-
-    vkDestroyPipeline(ctx.device, procedural_skybox_pipeline->pipeline.pipeline, nullptr);
-    for (uint32_t i = 0; i < procedural_skybox_pipeline->pipeline.descriptor_set_count; ++i)
-    {
-        if (procedural_skybox_pipeline->pipeline.set_layouts[i] == ctx.bindless_descriptor_set_layout) continue;
-        vkDestroyDescriptorSetLayout(ctx.device, procedural_skybox_pipeline->pipeline.set_layouts[i], nullptr);
-    }
-    vkDestroyPipelineLayout(ctx.device, procedural_skybox_pipeline->pipeline.layout, nullptr);
+    pipeline->builder.destroy_resources(pipeline->pipeline);
+    shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
+    procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
 
     ctx.shutdown();
 
