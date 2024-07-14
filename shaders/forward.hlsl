@@ -2,6 +2,7 @@
 #include "shared.h"
 #include "math.hlsli"
 #include "misc.hlsli"
+#include "pcss.hlsli"
 
 #define BINDLESS_DESCRIPTOR_SET_INDEX 1
 
@@ -27,6 +28,8 @@ struct VSOutput
 }
 [[vk::binding(2)]] StructuredBuffer<Material> materials;
 [[vk::binding(3)]] Texture2D shadowmap_texture;
+[[vk::binding(4)]] SamplerComparisonState shadow_sampler;
+[[vk::binding(5)]] SamplerState point_sampler;
 
 [[vk::push_constant]]
 PushConstantsForward push_constants;
@@ -138,19 +141,31 @@ PSOutput fs_main(VSOutput input)
     float3 Fd = material_context.basecolor.rgb / PI * (1.0 - F);
 
     float shadow = 1.0;
-    {
+    { // Shadow map
         float4 shadow_space = mul(globals.shadow_view_projection, float4(input.world_position, 1.0));
-        shadow_space /= shadow_space.w;
+        shadow_space.xyz /= shadow_space.w;
         float2 shadow_uv = shadow_space.xy * 0.5 + 0.5;
         shadow_uv.y = 1.0 - shadow_uv.y;
-        //if (all(saturate(shadow_uv) == shadow_uv))
+        float bias = 0.0005 / shadow_space.w;
+        float compare_value = shadow_space.z - bias;
+        if (all(saturate(shadow_uv) == shadow_uv))
         {
-            float shadow_depth = shadowmap_texture.Sample(bilinear_sampler, shadow_uv).r;
-            if (shadow_depth < shadow_space.z - 0.001) shadow = 0.1;
+            float w, h;
+            shadowmap_texture.GetDimensions(w, h);
+            float4 gathered = shadowmap_texture.Gather(point_sampler, shadow_uv).wzxy;
+            float2 pixel = shadow_uv * float2(w, h);
+            pixel -= 0.5;
+            float2 fracts = frac(pixel);
+            float4 weights = float4((1.0 - fracts.y) * (1.0 - fracts.x), (1.0 - fracts.y) * fracts.x, fracts.y * (1.0 - fracts.x), fracts.y * fracts.x);
+            shadow = dot(gathered > compare_value, weights);
+            shadow = PCSS(shadowmap_texture, point_sampler, shadow_sampler, globals.shadow_projection_info, float4(shadow_uv, compare_value, 1.0));
+
+            //shadow = shadowmap_texture.SampleCmp(shadow_sampler, shadow_uv, compare_value).r;
         }
     }
 
-    float3 radiance = (Fr + Fd) * NdotL * shadow;
+    float3 ambient = material_context.basecolor.rgb * 0.04;
+    float3 radiance = (Fr + Fd) * NdotL * shadow + ambient;
     float3 final_output = linear_to_srgb(radiance);
     output.color = float4(final_output, 1.0);
 

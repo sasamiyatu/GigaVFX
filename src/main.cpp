@@ -17,25 +17,18 @@ CMRC_DECLARE(embedded_shaders);
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
-#define GLM_ENABLE_EXPERIMENTAL
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include "glm/glm.hpp"
-#include "glm/gtx/transform.hpp"
-#include "glm/gtc/type_ptr.hpp"
-#include "glm/gtx/euler_angles.hpp"
-
 #include "../shaders/shared.h"
 
 #include "misc.h"
 #include "pipeline.h"
-
 #include "shaders.h"
-
+#include "gmath.h"
 #include "hot_reload.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
 #include "imgui/imgui_impl_vulkan.h"
+
 
 constexpr uint32_t window_width = 1280;
 constexpr uint32_t window_height = 720;
@@ -867,6 +860,7 @@ bool init_imgui()
     return success;
 }
 
+
 int main()
 {
     ctx.init();
@@ -888,8 +882,30 @@ int main()
         info.maxLod = VK_LOD_CLAMP_NONE;
         info.anisotropyEnable = VK_TRUE;
         info.maxAnisotropy = ctx.physical_device.properties.limits.maxSamplerAnisotropy;
-        LOG_INFO("Setting sampler max anisotropy to %f", info.maxAnisotropy);
         VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &sampler));
+    }
+    VkSampler shadow_sampler = VK_NULL_HANDLE;
+    {
+        VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        info.magFilter = VK_FILTER_LINEAR;
+        info.minFilter = VK_FILTER_LINEAR;
+        info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.compareEnable = VK_TRUE;
+        info.compareOp = VK_COMPARE_OP_LESS;
+        info.maxAnisotropy = ctx.physical_device.properties.limits.maxSamplerAnisotropy;
+        VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &shadow_sampler));
+    }
+    VkSampler point_sampler = VK_NULL_HANDLE;
+    {
+        VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        info.magFilter = VK_FILTER_NEAREST;
+        info.minFilter = VK_FILTER_NEAREST;
+        info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &point_sampler));
     }
 
     Texture depth_texture;
@@ -1230,6 +1246,7 @@ int main()
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
     ImGuiIO& io = ImGui::GetIO();
 
+    float slider[4] = {};
     while (running)
     {
         VkCommandBuffer command_buffer = ctx.begin_frame();
@@ -1249,7 +1266,6 @@ int main()
                 running = false;
                 break;
             case SDL_KEYDOWN:
-            case SDL_KEYUP:
             {
                 if (io.WantCaptureKeyboard) break;
 
@@ -1258,7 +1274,16 @@ int main()
                 case SDL_SCANCODE_ESCAPE:
                     running = false;
                     break;
+                case SDL_SCANCODE_F5:
+                    AssetCatalog::force_reload_all();
+                    break;
+                default:
+                    break;
                 }
+            }
+            case SDL_KEYUP:
+            {
+
             } break;
             case SDL_MOUSEWHEEL:
                 if (io.WantCaptureMouse) break;
@@ -1294,6 +1319,7 @@ int main()
             ImGui::Text("counter = %d", counter);
 
             ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+
             ImGui::End();
         }
 
@@ -1356,11 +1382,23 @@ int main()
             globals.projection = glm::perspective(camera.fov, (float)window_width / (float)window_height, camera.znear, camera.zfar);
             globals.viewprojection = globals.projection * globals.view;
             globals.camera_pos = glm::vec4(camera.position, 1.0f);
-            globals.sun_direction = glm::vec4(glm::normalize(glm::vec3(1.0f)), 1.0f);
+            glm::vec3 sundir = glm::normalize(glm::vec3(1.0f));
+            globals.sun_direction = glm::vec4(sundir, 1.0f);
             globals.sun_color_and_intensity = glm::vec4(1.0f);
-            globals.shadow_view = glm::lookAt(glm::vec3(globals.sun_direction) * 30.0f, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            globals.shadow_view = glm::lookAt(camera.position + sundir * 30.0f, camera.position, glm::vec3(0.0f, 1.0f, 0.0f));
             globals.shadow_projection = glm::ortho(-30.0f, 30.0f, -30.0f, 30.0f, 0.1f, 100.0f);
             globals.shadow_view_projection = globals.shadow_projection * globals.shadow_view;
+            float znear = globals.shadow_projection[3][2] / globals.shadow_projection[2][2];
+            float zfar_minus_znear = -1.0f / globals.shadow_projection[2][2];
+            globals.shadow_projection_info = glm::vec4(zfar_minus_znear, znear, 0.0f, 0.0f);
+
+            glm::vec4 shadow_origin = globals.shadow_view_projection * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            shadow_origin /= shadow_origin.w;
+            float step = 1.0f / 1024.0f;
+            glm::vec2 rounded = glm::round(glm::vec2(shadow_origin) / step) * step;
+            globals.shadow_view_projection = glm::translate(glm::mat4(1.0f), glm::vec3(rounded.x - shadow_origin.x, rounded.y - shadow_origin.y, 0.0f)) * globals.shadow_view_projection;
+
+            Sphere frustum_bounding_sphere = get_frustum_bounding_sphere(globals.projection);
 
             void* mapped;
             vmaMapMemory(ctx.allocator, globals_buffer.allocation, &mapped);
@@ -1586,7 +1624,7 @@ int main()
                     vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
                     for (const auto& primitive : mesh.primitives)
                     {
-                        VkWriteDescriptorSet descriptors[4] = {};
+                        VkWriteDescriptorSet descriptors[6] = {};
 
                         VkDescriptorImageInfo iinfo0{};
                         iinfo0.sampler = sampler;
@@ -1628,6 +1666,24 @@ int main()
                         descriptors[3].descriptorCount = 1;
                         descriptors[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
                         descriptors[3].pImageInfo = &iinfo1;
+
+                        VkDescriptorImageInfo iinfo2{};
+                        iinfo2.sampler = shadow_sampler;
+                        descriptors[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        descriptors[4].dstSet = 0;
+                        descriptors[4].dstBinding = 4;
+                        descriptors[4].descriptorCount = 1;
+                        descriptors[4].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+                        descriptors[4].pImageInfo = &iinfo2;
+
+                        VkDescriptorImageInfo iinfo3{};
+                        iinfo3.sampler = point_sampler;
+                        descriptors[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        descriptors[5].dstSet = 0;
+                        descriptors[5].dstBinding = 5;
+                        descriptors[5].descriptorCount = 1;
+                        descriptors[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+                        descriptors[5].pImageInfo = &iinfo3;
 
                         pc.material_index = primitive.material;
 
@@ -1675,6 +1731,8 @@ int main()
     vmaDestroyBuffer(ctx.allocator, materials_buffer.buffer, materials_buffer.allocation);
     vmaDestroyBuffer(ctx.allocator, globals_buffer.buffer, globals_buffer.allocation);
     vkDestroySampler(ctx.device, sampler, nullptr);
+    vkDestroySampler(ctx.device, shadow_sampler, nullptr);
+    vkDestroySampler(ctx.device, point_sampler, nullptr);
     for (auto& t : textures)
     {
         vkDestroyImageView(ctx.device, t.view, nullptr);

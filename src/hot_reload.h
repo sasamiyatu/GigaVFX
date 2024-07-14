@@ -39,4 +39,5 @@ namespace AssetCatalog
 	void register_asset(IAsset* asset);
 	bool check_for_dirty_assets();
 	bool reload_dirty_assets();
+	void force_reload_all();
 }

@@ -56,6 +56,8 @@ cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
 add_executable(gigasticle
     src/cgltf.h
     src/defines.h
+    src/gmath.h
+    src/gmath.cpp
     src/hot_reload.h
     src/hot_reload.cpp
     src/main.cpp

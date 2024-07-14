@@ -10,6 +10,14 @@
 #include <SDL_vulkan.h>
 #include "log.h"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include "glm/glm.hpp"
+#include "glm/gtx/transform.hpp"
+#include "glm/gtc/type_ptr.hpp"
+#include "glm/gtx/euler_angles.hpp"
+
+
 #define VK_CHECK(x) \
     do {                                            \
         VkResult result = x;                        \

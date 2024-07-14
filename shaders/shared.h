@@ -13,6 +13,11 @@ using namespace glm;
 
 #endif
 
+float linearize_depth(float depth, float4 projection_info)
+{
+    return depth * projection_info.x + projection_info.y;
+}
+
 struct alignas(16) Material
 {
     float4 basecolor_factor;
@@ -45,6 +50,7 @@ struct ShaderGlobals
     float4x4 shadow_view;
     float4x4 shadow_projection;
     float4x4 shadow_view_projection;
+    float4 shadow_projection_info;
     float4 camera_pos;
     float4 sun_direction;
     float4 sun_color_and_intensity;

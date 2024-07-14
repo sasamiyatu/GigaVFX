@@ -103,6 +103,11 @@ bool AssetCatalog::reload_dirty_assets()
 	return all_success;
 }
 
+void AssetCatalog::force_reload_all()
+{
+	for (auto& a : registered_assets) a.dirty = true;
+}
+
 std::filesystem::path ComputePipelineAsset::get_filepath() const
 {
 	return std::filesystem::path(std::string("shaders")) / std::filesystem::path(shader_path);
