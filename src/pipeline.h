@@ -3,12 +3,43 @@
 #include "defines.h"
 #include "spirv_reflect.h"
 
+struct DescriptorInfo
+{
+    union
+    {
+        VkDescriptorImageInfo image_info;
+        VkDescriptorBufferInfo buffer_info;
+    };
+
+    inline DescriptorInfo(VkSampler sampler)
+    {
+        image_info = {};
+        image_info.sampler = sampler;
+    }
+
+    inline DescriptorInfo(VkBuffer buffer, size_t offset = 0, size_t range = VK_WHOLE_SIZE)
+    {
+        buffer_info = {};
+        buffer_info.buffer = buffer;
+        buffer_info.offset = offset;
+        buffer_info.range = range;
+    }
+
+    inline DescriptorInfo(VkImageView image_view, VkImageLayout layout)
+    {
+        image_info = {};
+        image_info.imageView = image_view;
+        image_info.imageLayout = layout;
+    }
+};
+
 struct Pipeline
 {
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout set_layouts[4] = {};
     uint32_t descriptor_set_count = 0;
+    VkDescriptorUpdateTemplate descriptor_update_template = VK_NULL_HANDLE;
 };
 
 struct GraphicsPipelineBuilder

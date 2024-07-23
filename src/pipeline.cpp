@@ -155,7 +155,6 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 
     Pipeline old_pipeline = *out_pipeline;
 
-
     hot_reloadable = true;
     pipeline_create_info.pNext = &rendering_create_info;
     pipeline_create_info.pStages = shader_stage_create_info;
@@ -172,6 +171,8 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
     color_blend_state.pAttachments = color_blend_attachments;
 
     rendering_create_info.pColorAttachmentFormats = color_attachment_formats;
+
+    std::vector<VkDescriptorUpdateTemplateEntry> descriptor_template_entries;
 
     for (size_t i = 0; i < pipeline_create_info.stageCount; ++i)
     {
@@ -214,6 +215,18 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
                     out_binding.descriptorCount = binding->count;
                     out_binding.descriptorType = (VkDescriptorType)binding->descriptor_type;
                     out_binding.stageFlags |= mod.shader_stage;
+
+                    if (j == 0) // Only create update template for set 0 for now
+                    {
+                        VkDescriptorUpdateTemplateEntry entry{};
+                        entry.dstBinding = binding->binding;
+                        entry.dstArrayElement = 0;
+                        entry.descriptorCount = binding->count;
+                        entry.descriptorType = (VkDescriptorType)binding->descriptor_type;
+                        entry.offset = k * sizeof(DescriptorInfo);
+                        entry.stride = sizeof(DescriptorInfo);
+                        descriptor_template_entries.push_back(entry);
+                    }
                 }
             }
         }
@@ -227,6 +240,8 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
             info.pBindings = bindings[i].data();
             VK_CHECK(vkCreateDescriptorSetLayout(device, &info, nullptr, &set_layouts[i]));
         }
+
+
 
         VkPipelineLayoutCreateInfo info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
         info.setLayoutCount = descriptor_set_layout_count;
@@ -243,6 +258,17 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
         pp.descriptor_set_count = descriptor_set_layout_count;
         memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * descriptor_set_layout_count);
     }
+
+    VkDescriptorUpdateTemplateCreateInfo desc_template_info{ VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO };
+    desc_template_info.descriptorUpdateEntryCount = descriptor_template_entries.size();
+    desc_template_info.pDescriptorUpdateEntries = descriptor_template_entries.data();
+    desc_template_info.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_PUSH_DESCRIPTORS_KHR;
+    desc_template_info.descriptorSetLayout = pp.set_layouts[0];
+    desc_template_info.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    desc_template_info.pipelineLayout = pp.layout;
+    desc_template_info.set = 0;
+
+    VK_CHECK(vkCreateDescriptorUpdateTemplate(device, &desc_template_info, nullptr, &pp.descriptor_update_template));
 
     VK_CHECK(vkCreateGraphicsPipelines(device, pipeline_cache, 1, &pipeline_create_info, nullptr, &pp.pipeline));
 
@@ -261,14 +287,29 @@ void GraphicsPipelineBuilder::destroy_resources(Pipeline& pipeline)
     for (uint32_t i = 0; i < 4; ++i)
     {
         if (!set_layout_passed_from_outside[i] && pipeline.set_layouts[i] != VK_NULL_HANDLE)
+        {
             vkDestroyDescriptorSetLayout(device, pipeline.set_layouts[i], nullptr);
+            pipeline.set_layouts[i] = VK_NULL_HANDLE;
+        }
     }
 
     if (pipeline.layout != VK_NULL_HANDLE)
+    {
         vkDestroyPipelineLayout(device, pipeline.layout, nullptr);
+        pipeline.layout = VK_NULL_HANDLE;
+    }
 
     if (pipeline.pipeline != VK_NULL_HANDLE)
+    {
         vkDestroyPipeline(device, pipeline.pipeline, nullptr);
+        pipeline.pipeline = VK_NULL_HANDLE;
+    }
+
+    if (pipeline.descriptor_update_template != VK_NULL_HANDLE)
+    {
+        vkDestroyDescriptorUpdateTemplate(device, pipeline.descriptor_update_template, nullptr);
+        pipeline.descriptor_update_template = VK_NULL_HANDLE;
+    }
 }
 
 
@@ -298,6 +339,8 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
 {
     Pipeline& pp = *out_pipeline;
     Pipeline old_pipeline = *out_pipeline;
+
+    std::vector<VkDescriptorUpdateTemplateEntry> descriptor_template_entries;
 
     {
         shader_source.spirv = Shaders::load_shader(shader_source.filepath, VK_SHADER_STAGE_COMPUTE_BIT, &shader_source.size);
@@ -338,6 +381,18 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
                 out_binding.descriptorCount = binding->count;
                 out_binding.descriptorType = (VkDescriptorType)binding->descriptor_type;
                 out_binding.stageFlags |= mod.shader_stage;
+
+                if (j == 0) // Only create update template for set 0 for now
+                {
+                    VkDescriptorUpdateTemplateEntry entry{};
+                    entry.dstBinding = binding->binding;
+                    entry.dstArrayElement = 0;
+                    entry.descriptorCount = binding->count;
+                    entry.descriptorType = (VkDescriptorType)binding->descriptor_type;
+                    entry.offset = k * sizeof(DescriptorInfo);
+                    entry.stride = sizeof(DescriptorInfo);
+                    descriptor_template_entries.push_back(entry);
+                }
             }
         }
 
@@ -367,6 +422,17 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
         memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * descriptor_set_layout_count);
     }
 
+    VkDescriptorUpdateTemplateCreateInfo desc_template_info{ VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO };
+    desc_template_info.descriptorUpdateEntryCount = descriptor_template_entries.size();
+    desc_template_info.pDescriptorUpdateEntries = descriptor_template_entries.data();
+    desc_template_info.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_PUSH_DESCRIPTORS_KHR;
+    desc_template_info.descriptorSetLayout = pp.set_layouts[0];
+    desc_template_info.pipelineBindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
+    desc_template_info.pipelineLayout = pp.layout;
+    desc_template_info.set = 0;
+
+    VK_CHECK(vkCreateDescriptorUpdateTemplate(device, &desc_template_info, nullptr, &pp.descriptor_update_template));
+
     VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &create_info, nullptr, &pp.pipeline));
 
     destroy_resources(old_pipeline);
@@ -381,14 +447,28 @@ void ComputePipelineBuilder::destroy_resources(Pipeline& pipeline)
     for (uint32_t i = 0; i < 4; ++i)
     {
         if (!set_layout_passed_from_outside[i] && pipeline.set_layouts[i] != VK_NULL_HANDLE)
+        {
             vkDestroyDescriptorSetLayout(device, pipeline.set_layouts[i], nullptr);
+            pipeline.set_layouts[i] = VK_NULL_HANDLE;
+        }
     }
 
     if (pipeline.layout != VK_NULL_HANDLE)
+    {
         vkDestroyPipelineLayout(device, pipeline.layout, nullptr);
+        pipeline.layout = VK_NULL_HANDLE;
+    }
 
     if (pipeline.pipeline != VK_NULL_HANDLE)
+    {
         vkDestroyPipeline(device, pipeline.pipeline, nullptr);
+        pipeline.pipeline = VK_NULL_HANDLE;
+    }
 
+    if (pipeline.descriptor_update_template != VK_NULL_HANDLE)
+    {
+        vkDestroyDescriptorUpdateTemplate(device, pipeline.descriptor_update_template, nullptr);
+        pipeline.descriptor_update_template = VK_NULL_HANDLE;
+    }
 }
 

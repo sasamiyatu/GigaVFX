@@ -44,9 +44,9 @@
 
 // Convenience support for Volk
 // (you can also technically use IMGUI_IMPL_VULKAN_NO_PROTOTYPES + wrap Volk via ImGui_ImplVulkan_LoadFunctions().)
-//#define IMGUI_IMPL_VULKAN_USE_VOLK
+#define IMGUI_IMPL_VULKAN_USE_VOLK
 
-#define IMGUI_IMPL_VULKAN_NO_PROTOTYPES
+//#define IMGUI_IMPL_VULKAN_NO_PROTOTYPES
 
 
 #if defined(IMGUI_IMPL_VULKAN_NO_PROTOTYPES) && !defined(VK_NO_PROTOTYPES)

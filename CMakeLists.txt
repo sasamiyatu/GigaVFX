@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(VULKAN_SDK_DIR $ENV{VULKAN_SDK})
+set(SDL2_DIR ${VULKAN_SDK_DIR}/cmake)
+
 find_package(Vulkan REQUIRED volk dxc)
 find_package(SDL2 REQUIRED)
 
@@ -102,7 +105,7 @@ target_link_libraries(gigasticle PUBLIC Shaders::precompiled)
 # End shader stuff
 #===========================================================================================
 
-target_link_libraries(gigasticle PUBLIC SDL2::SDL2 Vulkan::Vulkan Vulkan::volk Vulkan::dxc_lib)
+target_link_libraries(gigasticle PUBLIC SDL2::SDL2 Vulkan::Vulkan Vulkan::dxc_lib)
 set_target_properties(
     gigasticle
     PROPERTIES

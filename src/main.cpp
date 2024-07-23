@@ -1,3 +1,4 @@
+#define VOLK_IMPLEMENTATION
 #include "defines.h"
 #include "VkBootstrap.h"
 #include "vk_helpers.h"
@@ -8,11 +9,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-#define VOLK_IMPLEMENTATION
 #include "Volk/volk.h"
-
-#include <cmrc/cmrc.hpp>
-CMRC_DECLARE(embedded_shaders);
 
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
@@ -28,7 +25,6 @@ CMRC_DECLARE(embedded_shaders);
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
 #include "imgui/imgui_impl_vulkan.h"
-
 
 constexpr uint32_t window_width = 1280;
 constexpr uint32_t window_height = 720;
@@ -791,40 +787,6 @@ void traverse_tree(const cgltf_node* node, F&& f)
 bool init_imgui()
 {
     ImGui_ImplVulkan_InitInfo info{};
-    /*// Initialization data, for ImGui_ImplVulkan_Init()
-// - VkDescriptorPool should be created with VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-//   and must contain a pool size large enough to hold an ImGui VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER descriptor.
-// - When using dynamic rendering, set UseDynamicRendering=true and fill PipelineRenderingCreateInfo structure.
-// [Please zero-clear before use!]
-    struct ImGui_ImplVulkan_InitInfo
-    {
-        VkInstance                      Instance;
-        VkPhysicalDevice                PhysicalDevice;
-        VkDevice                        Device;
-        uint32_t                        QueueFamily;
-        VkQueue                         Queue;
-        VkDescriptorPool                DescriptorPool;               // See requirements in note above
-        VkRenderPass                    RenderPass;                   // Ignored if using dynamic rendering
-        uint32_t                        MinImageCount;                // >= 2
-        uint32_t                        ImageCount;                   // >= MinImageCount
-        VkSampleCountFlagBits           MSAASamples;                  // 0 defaults to VK_SAMPLE_COUNT_1_BIT
-
-        // (Optional)
-        VkPipelineCache                 PipelineCache;
-        uint32_t                        Subpass;
-
-        // (Optional) Dynamic Rendering
-        // Need to explicitly enable VK_KHR_dynamic_rendering extension to use this, even for Vulkan 1.3.
-        bool                            UseDynamicRendering;
-#ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
-        VkPipelineRenderingCreateInfoKHR PipelineRenderingCreateInfo;
-#endif
-
-        // (Optional) Allocation, Debugging
-        const VkAllocationCallbacks* Allocator;
-        void                            (*CheckVkResultFn)(VkResult err);
-        VkDeviceSize                    MinAllocationSize;      // Minimum allocation size. Set to 1024*1024 to satisfy zealous best practices validation layer and waste a little memory.
-    }*/
     info.Instance = ctx.instance;
     info.PhysicalDevice = ctx.physical_device;
     info.Device = ctx.device;
@@ -1425,31 +1387,15 @@ int main()
         }
 
         { // Procedural sky box
-            VkWriteDescriptorSet descriptors[2] = {};
+            DescriptorInfo descriptor_info[] = {
+                DescriptorInfo(globals_buffer.buffer),
+                DescriptorInfo(swapchain_texture.view, VK_IMAGE_LAYOUT_GENERAL)
+            };
 
-            VkDescriptorBufferInfo binfo0{};
-            binfo0.buffer = globals_buffer.buffer;
-            binfo0.offset = 0;
-            binfo0.range = VK_WHOLE_SIZE;
-            descriptors[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptors[0].dstSet = 0;
-            descriptors[0].dstBinding = 0;
-            descriptors[0].descriptorCount = 1;
-            descriptors[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptors[0].pBufferInfo = &binfo0;
-
-            VkDescriptorImageInfo iinfo0{};
-            iinfo0.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            iinfo0.imageView = swapchain_texture.view;
-            descriptors[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptors[1].dstSet = 0;
-            descriptors[1].dstBinding = 1;
-            descriptors[1].descriptorCount = 1;
-            descriptors[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            descriptors[1].pImageInfo = &iinfo0;
-
-            vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline->pipeline.layout, 0, std::size(descriptors), descriptors);
+            vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, procedural_skybox_pipeline->pipeline.descriptor_update_template, procedural_skybox_pipeline->pipeline.layout, 0, descriptor_info);
+            
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline->pipeline.pipeline);
+
             uint32_t dispatch_x = get_golden_dispatch_size(window_width);
             uint32_t dispatch_y = get_golden_dispatch_size(window_height);
             vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
@@ -1496,6 +1442,13 @@ int main()
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowmap_pipeline->pipeline.pipeline);
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowmap_pipeline->pipeline.layout, 1, 1, &ctx.bindless_descriptor_set, 0, nullptr);
 
+            DescriptorInfo descriptor_info[] = {
+                DescriptorInfo(sampler),
+                DescriptorInfo(globals_buffer.buffer),
+                DescriptorInfo(materials_buffer.buffer)
+            };
+
+            vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, shadowmap_pipeline->pipeline.descriptor_update_template, shadowmap_pipeline->pipeline.layout, 0, descriptor_info);
 
             auto render_node = [&](const cgltf_node* node)
                 {
@@ -1517,45 +1470,9 @@ int main()
                         vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
                         for (const auto& primitive : mesh.primitives)
                         {
-                            VkWriteDescriptorSet descriptors[3] = {};
-
-                            VkDescriptorImageInfo iinfo0{};
-                            iinfo0.sampler = sampler;
-                            descriptors[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                            descriptors[0].dstSet = 0;
-                            descriptors[0].dstBinding = 0;
-                            descriptors[0].descriptorCount = 1;
-                            descriptors[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-                            descriptors[0].pImageInfo = &iinfo0;
-
-                            VkDescriptorBufferInfo binfo0{};
-                            binfo0.buffer = globals_buffer.buffer;
-                            binfo0.offset = 0;
-                            binfo0.range = VK_WHOLE_SIZE;
-                            descriptors[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                            descriptors[1].dstSet = 0;
-                            descriptors[1].dstBinding = 1;
-                            descriptors[1].descriptorCount = 1;
-                            descriptors[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                            descriptors[1].pBufferInfo = &binfo0;
-
-                            VkDescriptorBufferInfo binfo1{};
-                            binfo1.buffer = materials_buffer.buffer;
-                            binfo1.offset = 0;
-                            binfo1.range = VK_WHOLE_SIZE;
-                            descriptors[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                            descriptors[2].dstSet = 0;
-                            descriptors[2].dstBinding = 2;
-                            descriptors[2].descriptorCount = 1;
-                            descriptors[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                            descriptors[2].pBufferInfo = &binfo1;
-
-
-
                             pc.material_index = primitive.material;
 
                             vkCmdPushConstants(command_buffer, shadowmap_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-                            vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowmap_pipeline->pipeline.layout, 0, std::size(descriptors), descriptors);
                             vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
                         }
                     }
@@ -1568,7 +1485,6 @@ int main()
             }
 
             vkCmdEndRendering(command_buffer);
-
         }
 
 
@@ -1604,6 +1520,17 @@ int main()
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline.pipeline);
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline.layout, 1, 1, &ctx.bindless_descriptor_set, 0, nullptr);
 
+        DescriptorInfo descriptor_info[] = {
+            DescriptorInfo(sampler),
+            DescriptorInfo(globals_buffer.buffer),
+            DescriptorInfo(materials_buffer.buffer),
+            DescriptorInfo(shadowmap_texture.view, VK_IMAGE_LAYOUT_GENERAL),
+            DescriptorInfo(shadow_sampler),
+            DescriptorInfo(point_sampler),
+        };
+
+        vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, pipeline->pipeline.descriptor_update_template, pipeline->pipeline.layout, 0, descriptor_info);
+
         auto render_node = [&](const cgltf_node* node)
             {
                 if (node->mesh)
@@ -1624,71 +1551,9 @@ int main()
                     vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
                     for (const auto& primitive : mesh.primitives)
                     {
-                        VkWriteDescriptorSet descriptors[6] = {};
-
-                        VkDescriptorImageInfo iinfo0{};
-                        iinfo0.sampler = sampler;
-                        descriptors[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        descriptors[0].dstSet = 0;
-                        descriptors[0].dstBinding = 0;
-                        descriptors[0].descriptorCount = 1;
-                        descriptors[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-                        descriptors[0].pImageInfo = &iinfo0;
-
-                        VkDescriptorBufferInfo binfo0{};
-                        binfo0.buffer = globals_buffer.buffer;
-                        binfo0.offset = 0;
-                        binfo0.range = VK_WHOLE_SIZE;
-                        descriptors[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        descriptors[1].dstSet = 0;
-                        descriptors[1].dstBinding = 1;
-                        descriptors[1].descriptorCount = 1;
-                        descriptors[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                        descriptors[1].pBufferInfo = &binfo0;
-
-                        VkDescriptorBufferInfo binfo1{};
-                        binfo1.buffer = materials_buffer.buffer;
-                        binfo1.offset = 0;
-                        binfo1.range = VK_WHOLE_SIZE;
-                        descriptors[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        descriptors[2].dstSet = 0;
-                        descriptors[2].dstBinding = 2;
-                        descriptors[2].descriptorCount = 1;
-                        descriptors[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                        descriptors[2].pBufferInfo = &binfo1;
-
-                        VkDescriptorImageInfo iinfo1{};
-                        iinfo1.imageView = shadowmap_texture.view;
-                        iinfo1.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-                        descriptors[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        descriptors[3].dstSet = 0;
-                        descriptors[3].dstBinding = 3;
-                        descriptors[3].descriptorCount = 1;
-                        descriptors[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                        descriptors[3].pImageInfo = &iinfo1;
-
-                        VkDescriptorImageInfo iinfo2{};
-                        iinfo2.sampler = shadow_sampler;
-                        descriptors[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        descriptors[4].dstSet = 0;
-                        descriptors[4].dstBinding = 4;
-                        descriptors[4].descriptorCount = 1;
-                        descriptors[4].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-                        descriptors[4].pImageInfo = &iinfo2;
-
-                        VkDescriptorImageInfo iinfo3{};
-                        iinfo3.sampler = point_sampler;
-                        descriptors[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        descriptors[5].dstSet = 0;
-                        descriptors[5].dstBinding = 5;
-                        descriptors[5].descriptorCount = 1;
-                        descriptors[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-                        descriptors[5].pImageInfo = &iinfo3;
-
                         pc.material_index = primitive.material;
 
                         vkCmdPushConstants(command_buffer, pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-                        vkCmdPushDescriptorSetKHR(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline.layout, 0, std::size(descriptors), descriptors);
                         vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
                     }
                 }
@@ -1738,7 +1603,6 @@ int main()
         vkDestroyImageView(ctx.device, t.view, nullptr);
         vmaDestroyImage(ctx.allocator, t.image, t.allocation);
     }
-    //vkDestroyDescriptorSetLayout(ctx.device, set_layout, nullptr);
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
