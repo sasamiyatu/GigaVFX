@@ -27,7 +27,7 @@ struct VSOutput
     ShaderGlobals globals;
 }
 [[vk::binding(2)]] StructuredBuffer<Material> materials;
-[[vk::binding(3)]] Texture2D shadowmap_texture;
+[[vk::binding(3)]] Texture2DArray shadowmap_texture;
 [[vk::binding(4)]] SamplerComparisonState shadow_sampler;
 [[vk::binding(5)]] SamplerState point_sampler;
 
@@ -41,14 +41,14 @@ VSOutput vs_main(VSInput input)
     VSOutput output = (VSOutput)0;
     float3 pos = vk::RawBufferLoad<float3>(push_constants.position_buffer + input.vertex_id * 12);
     float3 world_pos = mul(push_constants.model, float4(pos, 1.0)).xyz;
-    output.world_position = world_pos;
+    float3 normal = push_constants.normal_buffer ? vk::RawBufferLoad<float3>(push_constants.normal_buffer + input.vertex_id * 12) : float3(0.0, 0.0, 1.0);
+    
     output.position = mul(globals.viewprojection, float4(world_pos, 1.0));
-    if (push_constants.normal_buffer)
-        output.normal = vk::RawBufferLoad<float3>(push_constants.normal_buffer + input.vertex_id * 12);
-    if (push_constants.texcoord0_buffer)
-        output.texcoord0 = vk::RawBufferLoad<float2>(push_constants.texcoord0_buffer + input.vertex_id * 8);
-    if (push_constants.tangent_buffer)
-        output.tangent = vk::RawBufferLoad<float4>(push_constants.tangent_buffer + input.vertex_id * 16);
+    output.world_position = world_pos;
+    output.normal  = mul(push_constants.model, float4(normal, 0.0)).xyz;
+
+    if (push_constants.texcoord0_buffer)    output.texcoord0 = vk::RawBufferLoad<float2>(push_constants.texcoord0_buffer + input.vertex_id * 8);
+    if (push_constants.tangent_buffer)      output.tangent = vk::RawBufferLoad<float4>(push_constants.tangent_buffer + input.vertex_id * 16);
     return output;
 }
 
@@ -142,25 +142,36 @@ PSOutput fs_main(VSOutput input)
 
     float shadow = 1.0;
     { // Shadow map
-        float4 shadow_space = mul(globals.shadow_view_projection, float4(input.world_position, 1.0));
+        float4 shadow_space = mul(globals.shadow_view_projection[0], float4(input.world_position, 1.0));
         shadow_space.xyz /= shadow_space.w;
         float2 shadow_uv = shadow_space.xy * 0.5 + 0.5;
         shadow_uv.y = 1.0 - shadow_uv.y;
-        float bias = 0.0005 / shadow_space.w;
+        float bias = 0.005 / shadow_space.w;
         float compare_value = shadow_space.z - bias;
         if (all(saturate(shadow_uv) == shadow_uv))
         {
-            float w, h;
-            shadowmap_texture.GetDimensions(w, h);
+            float w, h, elements;
+            shadowmap_texture.GetDimensions(w, h, elements);
+#if 0
             float4 gathered = shadowmap_texture.Gather(point_sampler, shadow_uv).wzxy;
             float2 pixel = shadow_uv * float2(w, h);
             pixel -= 0.5;
             float2 fracts = frac(pixel);
             float4 weights = float4((1.0 - fracts.y) * (1.0 - fracts.x), (1.0 - fracts.y) * fracts.x, fracts.y * (1.0 - fracts.x), fracts.y * fracts.x);
             shadow = dot(gathered > compare_value, weights);
-            shadow = PCSS(shadowmap_texture, point_sampler, shadow_sampler, globals.shadow_projection_info, float4(shadow_uv, compare_value, 1.0));
+            shadow = PCSS(shadowmap_texture, point_sampler, shadow_sampler, globals.shadow_projection_info[0], float4(shadow_uv, compare_value, 1.0));
+#else
+            float shd = 0.0;
+            float2 pixel_size = float2(1.0 / w, 1.0 / h);
+            for (int i = 0; i < PCF_NUM_SAMPLES; ++i)
+            {
+                float s = shadowmap_texture.SampleCmp(shadow_sampler, float3(shadow_uv + poissonDisk[i] * pixel_size * 2.0, 0.0), compare_value).r;
+                shd += s;
+            }
 
-            //shadow = shadowmap_texture.SampleCmp(shadow_sampler, shadow_uv, compare_value).r;
+            shd /= float(PCF_NUM_SAMPLES);
+            shadow = shd;
+#endif
         }
     }
 
@@ -168,6 +179,7 @@ PSOutput fs_main(VSOutput input)
     float3 radiance = (Fr + Fd) * NdotL * shadow + ambient;
     float3 final_output = linear_to_srgb(radiance);
     output.color = float4(final_output, 1.0);
+    //output.color.rgb = N * 0.5 + 0.5;
 
     return output;
 }

@@ -97,6 +97,7 @@ struct GraphicsPipelineBuilder
     GraphicsPipelineBuilder& set_vertex_shader_filepath(const char* filepath);
     GraphicsPipelineBuilder& set_fragment_shader_filepath(const char* filepath);
     GraphicsPipelineBuilder& set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout);
+    GraphicsPipelineBuilder& set_view_mask(uint32_t mask);
 
     bool build(Pipeline* pipeline);
     void destroy_resources(Pipeline& pipeline);

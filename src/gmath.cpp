@@ -64,6 +64,7 @@ Circle welzl_circle_2d(glm::vec2* points, int num_points, glm::vec2* support, in
 
 Sphere get_frustum_bounding_sphere(glm::mat4 projection)
 {
+#if 0 
 	glm::vec3 frustum_points[4] = {
 		glm::vec3(-1.0f, 1.0f, 1.0f),
 		glm::vec3(1.0f, 1.0f, 1.0f),
@@ -99,19 +100,40 @@ Sphere get_frustum_bounding_sphere(glm::mat4 projection)
 	Circle circle = welzl_circle_2d(points, 4, sup, 0);
 	glm::vec3 center = x_axis * circle.center.x + y_axis * circle.center.y;
 
+#else
+
+	glm::vec3 frustum_points[9] = {
+		glm::vec3(-1.0f, 1.0f, 1.0f),
+		glm::vec3(1.0f, 1.0f, 1.0f),
+		glm::vec3(-1.0f, -1.0f, 1.0f),
+		glm::vec3(1.0f, -1.0f, 1.0f),
+		glm::vec3(-1.0f, 1.0f, 0.0f),
+		glm::vec3(1.0f, 1.0f, 0.0f),
+		glm::vec3(-1.0f, -1.0f, 0.0f),
+		glm::vec3(1.0f, -1.0f, 0.0f),
+	};
+
+	glm::vec3 frustum_points_view_space[8] = {};
+	for (int i = 0; i < 8; ++i)
+	{
+		glm::vec4 unproject = glm::inverse(projection) * glm::vec4(frustum_points[i], 1.0f);
+		frustum_points_view_space[i] = glm::vec3(unproject) / unproject.w;
+	}
+
 	glm::vec3 dumb_center = glm::vec3(0.0f);
-	for (int i = 0; i < 4; ++i)
+	for (int i = 0; i < 8; ++i)
 	{
 		dumb_center += frustum_points_view_space[i];
 	}
-	dumb_center /= 4.0f;
+	dumb_center /= 8.0f;
 
 	float longest = 0.0f;
-	for (int i = 0; i < 4; ++i)
+	for (int i = 0; i < 8; ++i)
 	{
 		float l = glm::distance(dumb_center, frustum_points_view_space[i]);
 		if (l > longest) longest = l;
 	}
 
-	return Sphere{ center, circle.radius };
+	return Sphere{ dumb_center, longest };
+#endif
 }

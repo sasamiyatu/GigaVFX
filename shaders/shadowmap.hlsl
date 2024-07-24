@@ -8,6 +8,7 @@
 struct VSInput
 {
     uint vertex_id: SV_VertexID;
+    uint view_id: SV_ViewID;
 };
 
 struct VSOutput
@@ -32,7 +33,7 @@ VSOutput vs_main(VSInput input)
     VSOutput output = (VSOutput)0;
     float3 pos = vk::RawBufferLoad<float3>(push_constants.position_buffer + input.vertex_id * 12);
     float3 world_pos = mul(push_constants.model, float4(pos, 1.0)).xyz;
-    output.position = mul(globals.shadow_view_projection, float4(world_pos, 1.0));
+    output.position = mul(globals.shadow_view_projection[input.view_id], float4(world_pos, 1.0));
     if (push_constants.texcoord0_buffer)
         output.texcoord0 = vk::RawBufferLoad<float2>(push_constants.texcoord0_buffer + input.vertex_id * 8);
     return output;

@@ -57,13 +57,19 @@ cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
 )
 
 add_executable(gigasticle
+    src/buffer.h
     src/cgltf.h
     src/defines.h
+    src/gltf.h
+    src/gltf.cpp
     src/gmath.h
     src/gmath.cpp
+    src/graphics_context.h
+    src/graphics_context.cpp
     src/hot_reload.h
     src/hot_reload.cpp
     src/main.cpp
+    src/mesh.h
     src/misc.h
     src/log.h
     src/pipeline.h
@@ -74,6 +80,7 @@ add_executable(gigasticle
     src/spirv_reflect.h
     src/spirv_reflect.cpp
     src/stb_image.h
+    src/texture.h
     src/VkBootstrap.h
     src/VkBootstrap.cpp
     src/VkBootstrapDispatch.h

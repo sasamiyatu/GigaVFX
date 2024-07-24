@@ -17,6 +17,7 @@
 #include "glm/gtc/type_ptr.hpp"
 #include "glm/gtx/euler_angles.hpp"
 
+#define VECTOR_SIZE_BYTES(x) (x.size() * sizeof(x[0]))
 
 #define VK_CHECK(x) \
     do {                                            \
