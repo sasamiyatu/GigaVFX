@@ -16,3 +16,8 @@ float3 srgb_to_linear(float3 color)
 
     return select(cutoff, lower, higher);
 }
+
+float rgb_to_luminance(float3 color)
+{
+    return dot(color, float3(0.2126, 0.7152, 0.0722));
+}

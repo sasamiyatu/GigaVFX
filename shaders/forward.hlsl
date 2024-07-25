@@ -18,6 +18,7 @@ struct VSOutput
     float3 normal: NORMAL;
     float4 tangent: TANGENT;
     float3 world_position: POSITION;
+    float3 view_position: TEXCOORD1;
 };
 
 [[vk::binding(0, BINDLESS_DESCRIPTOR_SET_INDEX)]] Texture2D<float4> bindless_textures[];
@@ -43,6 +44,7 @@ VSOutput vs_main(VSInput input)
     float3 world_pos = mul(push_constants.model, float4(pos, 1.0)).xyz;
     float3 normal = push_constants.normal_buffer ? vk::RawBufferLoad<float3>(push_constants.normal_buffer + input.vertex_id * 12) : float3(0.0, 0.0, 1.0);
     
+    output.view_position = mul(globals.view, float4(world_pos, 1.0)).xyz;
     output.position = mul(globals.viewprojection, float4(world_pos, 1.0));
     output.world_position = world_pos;
     output.normal  = mul(push_constants.model, float4(normal, 0.0)).xyz;
@@ -141,8 +143,27 @@ PSOutput fs_main(VSOutput input)
     float3 Fd = material_context.basecolor.rgb / PI * (1.0 - F);
 
     float shadow = 1.0;
+
+    const float3 cascade_colors[4] = {float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(1.0, 0.0, 1.0)};
+#if 1
+    float view_z = abs(input.view_position.z);
+    float cascade = dot(globals.shadow_cascade_thresholds < view_z, 1.0) - 1.0;
+#else
+    float cascade = 3.0;
+    for (int i = 0; i < 4; ++i)
+    {
+        float4 shadow_space = mul(globals.shadow_view_projection[i], float4(input.world_position, 1.0));
+        shadow_space.xyz /= shadow_space.w;
+        float2 shadow_uv = shadow_space.xy * 0.5 + 0.5;
+        if (all(saturate(shadow_uv) == shadow_uv))
+        {
+            cascade = i;
+            break;
+        }
+    }
+#endif
     { // Shadow map
-        float4 shadow_space = mul(globals.shadow_view_projection[0], float4(input.world_position, 1.0));
+        float4 shadow_space = mul(globals.shadow_view_projection[cascade], float4(input.world_position, 1.0));
         shadow_space.xyz /= shadow_space.w;
         float2 shadow_uv = shadow_space.xy * 0.5 + 0.5;
         shadow_uv.y = 1.0 - shadow_uv.y;
@@ -165,7 +186,7 @@ PSOutput fs_main(VSOutput input)
             float2 pixel_size = float2(1.0 / w, 1.0 / h);
             for (int i = 0; i < PCF_NUM_SAMPLES; ++i)
             {
-                float s = shadowmap_texture.SampleCmp(shadow_sampler, float3(shadow_uv + poissonDisk[i] * pixel_size * 2.0, 0.0), compare_value).r;
+                float s = shadowmap_texture.SampleCmp(shadow_sampler, float3(shadow_uv + poissonDisk[i] * pixel_size * 2.0, cascade), compare_value).r;
                 shd += s;
             }
 
@@ -177,6 +198,7 @@ PSOutput fs_main(VSOutput input)
 
     float3 ambient = material_context.basecolor.rgb * 0.04;
     float3 radiance = (Fr + Fd) * NdotL * shadow + ambient;
+    //radiance = rgb_to_luminance(radiance) * cascade_colors[int(cascade)];
     float3 final_output = linear_to_srgb(radiance);
     output.color = float4(final_output, 1.0);
     //output.color.rgb = N * 0.5 + 0.5;

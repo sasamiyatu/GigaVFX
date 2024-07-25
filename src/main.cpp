@@ -427,11 +427,13 @@ int main(int argc, char** argv)
 
 
             glm::vec4 origin_shift[4];
-            float max_distance = 250.0f;
+            float max_distance = 100.0f;
             glm::mat4 shadow_projs[4];
             glm::mat4 shadow_views[4];
             glm::mat4 shadow_view_projs[4];
-            float distance_thresholds[4] = { 0.0f, 5.0, 20.0f, 70.0f };
+            float distance_thresholds[4] = { 0.0f, 5.0, 15.0f, 45.0f };
+            memcpy(glm::value_ptr(globals.shadow_cascade_thresholds), distance_thresholds, sizeof(distance_thresholds));
+            LOG_DEBUG("Pos: %f %f %f", camera.position.x, camera.position.y, camera.position.z);
             for (int i = 0; i < 4; ++i)
             {
                 float near_plane = std::max(distance_thresholds[i], 0.01f);
@@ -439,7 +441,7 @@ int main(int argc, char** argv)
                 glm::mat4 proj = glm::perspective(camera.fov, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, near_plane, far_plane);
                 Sphere frustum_bounding_sphere = get_frustum_bounding_sphere(proj);
                 float r = frustum_bounding_sphere.radius;
-                glm::mat4 shadow_proj = glm::ortho(-r, r, -r, r, 0.01f, 2.0f * r);
+                glm::mat4 shadow_proj = glm::ortho(-r, r, -r, r, 0.1f, 2.0f * r);
                 shadow_projs[i] = shadow_proj;
 
                 glm::vec3 cascade_center = glm::vec3(globals.view_inverse * glm::vec4(frustum_bounding_sphere.center, 1.0f));

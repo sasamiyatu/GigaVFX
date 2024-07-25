@@ -55,6 +55,7 @@ struct ShaderGlobals
     float4x4 shadow_projection[4];
     float4x4 shadow_view_projection[4];
     float4 shadow_projection_info[4];
+    float4 shadow_cascade_thresholds;
     float4 camera_pos;
     float4 sun_direction;
     float4 sun_color_and_intensity;
