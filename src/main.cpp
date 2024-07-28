@@ -418,13 +418,6 @@ int main(int argc, char** argv)
             glm::vec3 sundir = glm::normalize(glm::vec3(1.0f));
             globals.sun_direction = glm::vec4(sundir, 1.0f);
             globals.sun_color_and_intensity = glm::vec4(1.0f);
-            //globals.shadow_view = glm::lookAt(camera.position + sundir * 30.0f, camera.position, glm::vec3(0.0f, 1.0f, 0.0f));
-            //globals.shadow_projection = glm::ortho(-30.0f, 30.0f, -30.0f, 30.0f, 0.1f, 100.0f);
-            //globals.shadow_view_projection = globals.shadow_projection * globals.shadow_view;
-            //float znear = globals.shadow_projection[3][2] / globals.shadow_projection[2][2];
-            //float zfar_minus_znear = -1.0f / globals.shadow_projection[2][2];
-            //globals.shadow_projection_info = glm::vec4(zfar_minus_znear, znear, 0.0f, 0.0f);
-
 
             glm::vec4 origin_shift[4];
             float max_distance = 100.0f;
@@ -433,7 +426,6 @@ int main(int argc, char** argv)
             glm::mat4 shadow_view_projs[4];
             float distance_thresholds[4] = { 0.0f, 5.0, 15.0f, 45.0f };
             memcpy(glm::value_ptr(globals.shadow_cascade_thresholds), distance_thresholds, sizeof(distance_thresholds));
-            LOG_DEBUG("Pos: %f %f %f", camera.position.x, camera.position.y, camera.position.z);
             for (int i = 0; i < 4; ++i)
             {
                 float near_plane = std::max(distance_thresholds[i], 0.01f);
@@ -464,15 +456,6 @@ int main(int argc, char** argv)
                 glm::vec2 rounded = glm::round(glm::vec2(shadow_origin) / step) * step;
                 globals.shadow_view_projection[i] = glm::translate(glm::mat4(1.0f), glm::vec3(rounded.x - shadow_origin.x, rounded.y - shadow_origin.y, 0.0f)) * globals.shadow_view_projection[i];
             }
-
-            int index = 0;
-            //globals.shadow_view = shadow_views[index];
-            //globals.shadow_projection = shadow_projs[index];
-            //globals.shadow_view_projection = shadow_view_projs[index];
-            //float znear = globals.shadow_projection[3][2] / globals.shadow_projection[2][2];
-            //float zfar_minus_znear = -1.0f / globals.shadow_projection[2][2];
-            //globals.shadow_projection_info = glm::vec4(zfar_minus_znear, znear, 0.0f, 0.0f);
-
 
             void* mapped;
             vmaMapMemory(ctx.allocator, globals_buffer.allocation, &mapped);
