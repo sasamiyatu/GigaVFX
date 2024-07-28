@@ -3,6 +3,13 @@
 #include "defines.h"
 #include "spirv_reflect.h"
 
+enum class BlendPreset
+{
+    NONE = 0,
+    ALPHA,
+    ADDITIVE
+};
+
 struct DescriptorInfo
 {
     union
@@ -99,6 +106,7 @@ struct GraphicsPipelineBuilder
     GraphicsPipelineBuilder& set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout);
     GraphicsPipelineBuilder& set_view_mask(uint32_t mask);
     GraphicsPipelineBuilder& set_topology(VkPrimitiveTopology topology);
+    GraphicsPipelineBuilder& set_blend_preset(BlendPreset preset);
 
     bool build(Pipeline* pipeline);
     void destroy_resources(Pipeline& pipeline);

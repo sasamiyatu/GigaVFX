@@ -26,6 +26,7 @@
 #include "gltf.h"
 #include "graphics_context.h"
 #include "particle_system.h"
+#include "random.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
@@ -344,6 +345,7 @@ int main(int argc, char** argv)
             ImGui::End();
         }
 #endif
+        particle_system.draw_ui();
 
         movement_speed = std::max(movement_speed, 0.0f);
 

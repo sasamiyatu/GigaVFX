@@ -34,7 +34,10 @@ void Context::init(int window_width, int window_height)
             auto severity = vkb::to_string_message_severity(messageSeverity);
             auto type = vkb::to_string_message_type(messageType);
             LOG_ERROR("[%s: %s] %s\n", severity, type, pCallbackData->pMessage);
-            assert(false);
+            if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+            {
+                assert(false);
+            }
             return VK_FALSE;
         }
     );

@@ -26,7 +26,9 @@ if(WEBGPU_USE_PRECOMPILED_SHADERS)
     add_compile_definitions(USE_PRECOMPILED_SHADERS)
 endif()
 
-find_program(DXC dxc REQUIRED)
+
+find_program(DXC dxc REQUIRED PATHS ${VULKAN_SDK_DIR}/Bin NO_DEFAULT_PATH)
+message(${DXC})
 include(CMakeRC.cmake)
 
 set(COMPILED_SHADERS)
@@ -76,6 +78,7 @@ add_executable(gigasticle
     src/particle_system.cpp
     src/pipeline.h
     src/pipeline.cpp
+    src/random.h
     src/shaders.h
     src/shaders.cpp
     src/spirv_reflect.c
@@ -87,6 +90,9 @@ add_executable(gigasticle
     src/VkBootstrap.cpp
     src/VkBootstrapDispatch.h
     src/vk_helpers.h
+
+    src/pcg/pcg_basic.h
+    src/pcg/pcg_basic.cpp
 
     src/imgui/imconfig.h
     src/imgui/imgui_internal.h

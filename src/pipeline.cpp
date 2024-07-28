@@ -161,6 +161,44 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_topology(VkPrimitiveTopolo
     return *this;
 }
 
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_blend_preset(BlendPreset preset)
+{
+    /*    VkBool32                 blendEnable;
+    VkBlendFactor            srcColorBlendFactor;
+    VkBlendFactor            dstColorBlendFactor;
+    VkBlendOp                colorBlendOp;
+    VkBlendFactor            srcAlphaBlendFactor;
+    VkBlendFactor            dstAlphaBlendFactor;
+    VkBlendOp                alphaBlendOp;
+    VkColorComponentFlags    colorWriteMask;*/
+    switch (preset)
+    {
+    case BlendPreset::ALPHA:
+        color_blend_attachments[0].blendEnable = VK_TRUE;
+        color_blend_attachments[0].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachments[0].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachments[0].colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachments[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachments[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        color_blend_attachments[0].alphaBlendOp = VK_BLEND_OP_ADD;
+        break;
+    case BlendPreset::ADDITIVE:
+        color_blend_attachments[0].blendEnable = VK_TRUE;
+        color_blend_attachments[0].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachments[0].dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachments[0].colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachments[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachments[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        color_blend_attachments[0].alphaBlendOp = VK_BLEND_OP_ADD;
+        break;
+    case BlendPreset::NONE:
+    default:
+        break;
+    }
+
+    return *this;
+}
+
 bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 {
     Pipeline& pp = *out_pipeline;

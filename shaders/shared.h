@@ -49,6 +49,8 @@ struct PushCostantsParticles
 {
     float4 position;
     float4 color;
+    float size;
+    float normalized_lifetime;
 };
 
 struct ShaderGlobals

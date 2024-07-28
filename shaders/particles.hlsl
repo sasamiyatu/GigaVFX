@@ -12,14 +12,6 @@ struct VSInput
 struct VSOutput
 {
     float4 position: SV_Position;
-    [[vk::builtin("PointSize")]]
-    float point_size : PSIZE;
-    float4 color: COLOR0;
-};
-
-struct FSInput
-{
-    float4 position: SV_Position;
     float4 color: COLOR0;
 };
 
@@ -27,15 +19,32 @@ struct FSInput
     ShaderGlobals globals;
 }
 
+static const float2 offsets[4] = {
+    float2(-1.0f, 1.0f),
+    float2(-1.0f, -1.0f),
+    float2(1.0f, -1.0f),
+    float2(1.0f, 1.0f)
+};
+
+static const uint indices[6] = {
+    0,
+    1,
+    2,
+    2,
+    3,
+    0
+};
+
 [[vk::push_constant]]
 PushCostantsParticles push_constants;
 
 VSOutput vs_main(VSInput input)
 {
     VSOutput output = (VSOutput)0;
-    float3 world_pos = push_constants.position.xyz;
-    output.position = mul(globals.viewprojection, float4(world_pos, 1.0));
-    output.point_size = 10.0f;
+    float3 view_pos = mul(globals.view, float4(push_constants.position.xyz, 1.0f)).xyz;
+    view_pos.xy += offsets[indices[input.vertex_id]] * push_constants.size;
+    output.position = mul(globals.projection, float4(view_pos, 1.0));
+    output.color = push_constants.color;
     return output;
 }
 
@@ -44,10 +53,10 @@ struct PSOutput
     float4 color: SV_Target0;
 };
 
-PSOutput fs_main(FSInput input)
+PSOutput fs_main(VSOutput input)
 {
     PSOutput output = (PSOutput)0;
-    output.color = input.color;
+    output.color = float4(input.color.rgb, push_constants.normalized_lifetime);
 
     return output;
 }

@@ -8,8 +8,10 @@ struct Particle
 {
 	glm::vec3 position;
 	glm::vec3 velocity;
+	glm::vec3 acceleration;
 	glm::vec4 color;
 	float lifetime;
+	float size;
 };
 
 struct ParticleSystem
@@ -20,11 +22,22 @@ struct ParticleSystem
 	glm::vec3 position = glm::vec3(0.0f);
 
 	float lifetime = -1.0f; // Negative = infinite lifetime
-	float spawn_interval = 0.1f;
+	float emission_rate = 10.0f;
 	float time = 0.0f;
-	float time_until_spawn = 1.0f;
+
+	float cone_angle = 0.0f;
+	glm::vec4 particle_color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+	float initial_speed = 5.0f;
+	glm::vec3 acceleration = glm::vec3(0.0f, -9.81f, 0.0f);
+	float particle_lifetime = 5.0f;
+	float particle_size = 0.01f;
+	bool random_color = false;
+
+	float time_until_spawn = 0.0f;
 
 	void update(float dt);
+
+	void draw_ui();
 };
 
 struct Context;
