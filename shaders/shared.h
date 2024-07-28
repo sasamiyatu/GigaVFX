@@ -45,6 +45,12 @@ struct PushConstantsForward
     int material_index;
 };
 
+struct PushCostantsParticles
+{
+    float4 position;
+    float4 color;
+};
+
 struct ShaderGlobals
 {
     float4x4 view;

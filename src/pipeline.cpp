@@ -155,6 +155,12 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_view_mask(uint32_t mask)
     return *this;
 }
 
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_topology(VkPrimitiveTopology topology)
+{
+    input_assembly_state.topology = topology;
+    return *this;
+}
+
 bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 {
     Pipeline& pp = *out_pipeline;
@@ -173,6 +179,7 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
     pipeline_create_info.pDepthStencilState = &depth_stencil_state;
     pipeline_create_info.pColorBlendState = &color_blend_state;
     pipeline_create_info.pDynamicState = &dynamic_state;
+    dynamic_state.pDynamicStates = dynamic_states;
 
     color_blend_state.pAttachments = color_blend_attachments;
 

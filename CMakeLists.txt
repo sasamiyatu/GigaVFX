@@ -72,6 +72,8 @@ add_executable(gigasticle
     src/mesh.h
     src/misc.h
     src/log.h
+    src/particle_system.h
+    src/particle_system.cpp
     src/pipeline.h
     src/pipeline.cpp
     src/shaders.h

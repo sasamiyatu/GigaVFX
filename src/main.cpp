@@ -25,6 +25,7 @@
 #include "texture.h"
 #include "gltf.h"
 #include "graphics_context.h"
+#include "particle_system.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
@@ -258,6 +259,11 @@ int main(int argc, char** argv)
 
     float slider[4] = {};
 
+    ParticleRenderer particle_renderer;
+    particle_renderer.init(&ctx, globals_buffer.buffer, ctx.swapchain.image_format);
+    
+    ParticleSystem particle_system;
+
     std::vector<MeshInstance> mesh_draws;
 
     bool running = true;
@@ -314,6 +320,7 @@ int main(int argc, char** argv)
             }
         }
 
+#if 0 
         // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
         {
 
@@ -336,6 +343,7 @@ int main(int argc, char** argv)
 
             ImGui::End();
         }
+#endif
 
         movement_speed = std::max(movement_speed, 0.0f);
 
@@ -371,6 +379,8 @@ int main(int argc, char** argv)
         uint64_t tick = SDL_GetPerformanceCounter();
         double delta_time = (tick - current_tick) * inv_pfreq;
         current_tick = tick;
+
+        particle_system.update((float)delta_time);
 
         static float hot_reload_timer = 0.0f;
         hot_reload_timer += delta_time;
@@ -646,6 +656,8 @@ int main(int argc, char** argv)
             }
         }
 
+        particle_renderer.render(command_buffer, particle_system);
+
         {
             // ImGui rendering
             ImGui::Render();
@@ -687,6 +699,7 @@ int main(int argc, char** argv)
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
+    particle_renderer.shutdown();
 
     ctx.shutdown();
 

@@ -15,7 +15,10 @@ GraphicsPipelineAsset::GraphicsPipelineAsset(GraphicsPipelineBuilder build)
 	: builder(build)
 {
 	if (!builder.build(&pipeline))
+	{
+		assert(false);
 		exit(1);
+	}
 
 	shader_path = builder.shader_sources[0].filepath;
 }
