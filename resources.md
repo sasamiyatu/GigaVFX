@@ -25,6 +25,6 @@ Mar. 2014.
 
 ## Notes
 - Look into fluid simulation
-- Look into parsing expressions and evaluating bytecode
+- Look into parsing expressions and evaluating bytecode (watch Javid's video)
 - Look into particle shading / rendering
 - Look at example particle effects in Unity / Unreal
