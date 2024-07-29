@@ -262,8 +262,28 @@ int main(int argc, char** argv)
 
     ParticleRenderer particle_renderer;
     particle_renderer.init(&ctx, globals_buffer.buffer, ctx.swapchain.image_format);
+
+    Texture particle_texture{};
+    if (!load_texture_from_file("data/particles-single.png", particle_texture))
+    {
+        LOG_ERROR("Failed to load texture!");
+        exit(EXIT_FAILURE);
+    }
+    
+    Texture flipbook_texture{};
+    if (!load_texture_from_file("data/particles-flipbook.png", flipbook_texture))
+    {
+        LOG_ERROR("Failed to load texture!");
+        exit(EXIT_FAILURE);
+    }
+
+    ctx.create_textures(&particle_texture, 1);
+    ctx.create_textures(&flipbook_texture, 1);
+    particle_renderer.add_texture(&particle_texture);
+    particle_renderer.add_texture(&flipbook_texture);
     
     ParticleSystem particle_system;
+    particle_system.texture = &particle_renderer.textures[1];
 
     std::vector<MeshInstance> mesh_draws;
 
@@ -679,6 +699,8 @@ int main(int argc, char** argv)
     vkDestroyImageView(ctx.device, shadowmap_texture.view, nullptr);
     vmaDestroyImage(ctx.allocator, depth_texture.image, depth_texture.allocation);
     vkDestroyImageView(ctx.device, depth_texture.view, nullptr);
+    particle_texture.destroy(ctx.device, ctx.allocator);
+    flipbook_texture.destroy(ctx.device, ctx.allocator);
     for (auto& m : meshes)
     {
         vmaDestroyBuffer(ctx.allocator, m.indices.buffer, m.indices.allocation);

@@ -4,6 +4,37 @@
 
 #define MAX_PARTICLES 512
 
+struct ParticleSystem;
+
+struct Context;
+struct GraphicsPipelineAsset;
+struct Texture;
+
+struct ParticleRenderer
+{
+	Context* ctx;
+	GraphicsPipelineAsset* additive_blend_pipeline;
+	GraphicsPipelineAsset* alpha_blend_pipeline;
+	VkBuffer shader_globals;
+	// Descriptor pool for particle textures
+	VkSampler texture_sampler;
+
+	struct ParticleTexture
+	{
+		const Texture* texture;
+		VkDescriptorSet descriptor_set;
+	};
+
+	std::vector<ParticleTexture> textures;
+
+	Texture* white_texture;
+
+	void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format);
+	void shutdown();
+	void render(VkCommandBuffer command_buffer, const ParticleSystem& particle_system);
+	void add_texture(const Texture* tex);
+};
+
 struct Particle
 {
 	glm::vec3 position;
@@ -12,6 +43,7 @@ struct Particle
 	glm::vec4 color;
 	float lifetime;
 	float size;
+	int flipbook_index;
 };
 
 struct ParticleSystem
@@ -26,30 +58,28 @@ struct ParticleSystem
 	float time = 0.0f;
 
 	float cone_angle = 0.0f;
-	glm::vec4 particle_color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+	glm::vec4 particle_color0 = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+	glm::vec4 particle_color1 = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 	float initial_speed = 5.0f;
 	glm::vec3 acceleration = glm::vec3(0.0f, -9.81f, 0.0f);
 	float particle_lifetime = 5.0f;
 	float particle_size = 0.01f;
 	bool random_color = false;
 
+	enum BlendMode
+	{
+		ADDITIVE = 0,
+		ALPHA
+	};
+	int blend_mode = 0;
+
+	ParticleRenderer::ParticleTexture* texture = nullptr;
+	glm::ivec2 flipbook_size = glm::ivec2(1, 1);
+	int flipbook_index = 0;
+
 	float time_until_spawn = 0.0f;
 
 	void update(float dt);
 
 	void draw_ui();
-};
-
-struct Context;
-struct GraphicsPipelineAsset;
-
-struct ParticleRenderer
-{
-	Context* ctx;
-	GraphicsPipelineAsset* render_pipeline;
-	VkBuffer shader_globals;
-
-	void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format);
-	void shutdown();
-	void render(VkCommandBuffer command_buffer, const ParticleSystem& particle_system);
 };

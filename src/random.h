@@ -17,6 +17,13 @@ inline float random_in_range(float low, float high)
 	return uniform_random() * range + low;
 }
 
+inline int random_int_in_range(int low, int high)
+{
+	assert(high >= low);
+	int range = high - low;
+	return pcg32_random() % range + low;
+}
+
 // Returns a random vector within a cone oriented towards the +z axis
 inline glm::vec3 random_vector_in_cone(float min_angle_cos)
 {

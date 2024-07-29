@@ -8,11 +8,15 @@ struct Texture
     int width;
     int height;
 
+    const char* name;
+
     VkFormat format;
     VkImage image;
     VkImageView view;
     VkImageLayout layout;
     VmaAllocation allocation;
+
+    void destroy(VkDevice device, VmaAllocator allocator);
 };
 
 inline VkImageAspectFlagBits determine_image_aspect(VkFormat format)
@@ -29,3 +33,5 @@ inline VkImageAspectFlagBits determine_image_aspect(VkFormat format)
         return VK_IMAGE_ASPECT_COLOR_BIT;
     }
 }
+
+bool load_texture_from_file(const char* filepath, Texture& texture);
