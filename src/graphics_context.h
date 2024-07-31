@@ -24,6 +24,13 @@ struct Context
 
     VmaAllocator allocator;
 
+    struct
+    {
+        VkSampler bilinear;
+        VkSampler point;
+        VkSampler bilinear_clamp;
+    } samplers;
+
     std::vector<Texture> swapchain_textures;
     uint32_t swapchain_image_index = 0;
 

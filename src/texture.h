@@ -15,6 +15,7 @@ struct Texture
     VkImageView view;
     VkImageLayout layout;
     VmaAllocation allocation;
+    VkDescriptorSet descriptor_set; // Used with imgui
 
     void destroy(VkDevice device, VmaAllocator allocator);
 };

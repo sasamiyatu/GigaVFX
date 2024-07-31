@@ -9,6 +9,7 @@ struct ParticleSystem;
 struct Context;
 struct GraphicsPipelineAsset;
 struct Texture;
+struct TextureCatalog;
 
 struct ParticleRenderer
 {
@@ -19,20 +20,12 @@ struct ParticleRenderer
 	// Descriptor pool for particle textures
 	VkSampler texture_sampler;
 
-	struct ParticleTexture
-	{
-		const Texture* texture;
-		VkDescriptorSet descriptor_set;
-	};
-
-	std::vector<ParticleTexture> textures;
-
 	Texture* white_texture;
+	TextureCatalog* texture_catalog;
 
 	void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format);
 	void shutdown();
 	void render(VkCommandBuffer command_buffer, const ParticleSystem& particle_system);
-	void add_texture(const Texture* tex);
 };
 
 struct Particle
@@ -73,7 +66,9 @@ struct ParticleSystem
 	};
 	int blend_mode = 0;
 
-	ParticleRenderer::ParticleTexture* texture = nullptr;
+	ParticleRenderer* renderer = nullptr;
+	const Texture* texture = nullptr;
+	bool use_flipbook_animation = false;
 	glm::ivec2 flipbook_size = glm::ivec2(1, 1);
 	int flipbook_index = 0;
 

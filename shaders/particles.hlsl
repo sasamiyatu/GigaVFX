@@ -6,18 +6,21 @@
 struct VSInput
 {
     uint vertex_id: SV_VertexID;
-
 };
 
 struct VSOutput
 {
     float4 position: SV_Position;
     float4 color: COLOR0;
+    float2 uv: TEXCOORD0;
 };
 
 [[vk::binding(0)]] cbuffer globals {
     ShaderGlobals globals;
 }
+
+[[vk::binding(1)]] SamplerState texture_sampler;
+[[vk::binding(2)]] Texture2D texture;
 
 static const float2 offsets[4] = {
     float2(-1.0f, 1.0f),
@@ -45,6 +48,10 @@ VSOutput vs_main(VSInput input)
     view_pos.xy += offsets[indices[input.vertex_id]] * push_constants.size;
     output.position = mul(globals.projection, float4(view_pos, 1.0));
     output.color = push_constants.color;
+    float2 uv = offsets[indices[input.vertex_id]] * 0.5f + 0.5f;
+    float2 uv_scale = float2(1.0 / float2(push_constants.flipbook_size));
+    float2 uv_offset = float2(uv_scale.x * (push_constants.flipbook_index % push_constants.flipbook_size.x), uv_scale.y * (push_constants.flipbook_index / push_constants.flipbook_size.y));
+    output.uv = uv * uv_scale + uv_offset;
     return output;
 }
 
@@ -56,7 +63,10 @@ struct PSOutput
 PSOutput fs_main(VSOutput input)
 {
     PSOutput output = (PSOutput)0;
-    output.color = float4(input.color.rgb, push_constants.normalized_lifetime);
+    float4 tex = texture.Sample(texture_sampler, input.uv);
+    tex.rgb = srgb_to_linear(tex.rgb);
+
+    output.color = tex * float4(input.color.rgb, push_constants.normalized_lifetime);
 
     return output;
 }

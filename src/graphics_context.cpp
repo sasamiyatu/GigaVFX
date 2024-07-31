@@ -251,12 +251,50 @@ void Context::init(int window_width, int window_height)
         VK_CHECK(vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &bindless_descriptor_set_layout));
     }
 
-    {
+    { // Bindless descriptor set
         VkDescriptorSetAllocateInfo alloc_info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
         alloc_info.descriptorPool = bindless_descriptor_pool;
         alloc_info.descriptorSetCount = 1;
         alloc_info.pSetLayouts = &bindless_descriptor_set_layout;
         VK_CHECK(vkAllocateDescriptorSets(device, &alloc_info, &bindless_descriptor_set));
+    }
+
+    // Samplers
+    {
+        VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        info.magFilter = VK_FILTER_LINEAR;
+        info.minFilter = VK_FILTER_LINEAR;
+        info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        info.maxLod = VK_LOD_CLAMP_NONE;
+        info.anisotropyEnable = VK_TRUE;
+        info.maxAnisotropy = physical_device.properties.limits.maxSamplerAnisotropy;
+        VK_CHECK(vkCreateSampler(device, &info, nullptr, &samplers.bilinear));
+    }
+
+    // Samplers
+    {
+        VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        info.magFilter = VK_FILTER_LINEAR;
+        info.minFilter = VK_FILTER_LINEAR;
+        info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.maxLod = VK_LOD_CLAMP_NONE;
+        info.anisotropyEnable = VK_TRUE;
+        info.maxAnisotropy = physical_device.properties.limits.maxSamplerAnisotropy;
+        VK_CHECK(vkCreateSampler(device, &info, nullptr, &samplers.bilinear_clamp));
+    }
+
+    {
+        VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        info.magFilter = VK_FILTER_NEAREST;
+        info.minFilter = VK_FILTER_NEAREST;
+        info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        VK_CHECK(vkCreateSampler(device, &info, nullptr, &samplers.point));
     }
 }
 
@@ -285,6 +323,10 @@ void Context::shutdown()
         vkDestroySemaphore(device, rendering_finished_semaphore[i], nullptr);
     }
     vkDestroyCommandPool(device, transfer_command_pool, nullptr);
+
+    vkDestroySampler(device, samplers.bilinear, nullptr);
+    vkDestroySampler(device, samplers.point, nullptr);
+    vkDestroySampler(device, samplers.bilinear_clamp, nullptr);
     vkb::destroy_swapchain(swapchain);
     vkb::destroy_device(device);
     vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -579,6 +621,8 @@ bool Context::create_textures(Texture* textures, uint32_t count)
             dep_info.pImageMemoryBarriers = &barrier;
             vkCmdPipelineBarrier2(transfer_command_buffer, &dep_info);
         }
+
+        t.descriptor_set = ImGui_ImplVulkan_AddTexture(samplers.bilinear_clamp, t.view, t.layout);
     }
 
     vkEndCommandBuffer(transfer_command_buffer);

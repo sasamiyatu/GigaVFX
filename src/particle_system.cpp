@@ -6,6 +6,7 @@
 #include "random.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_vulkan.h"
+#include "texture_catalog.h"
 
 void ParticleSystem::update(float dt)
 {
@@ -35,7 +36,7 @@ void ParticleSystem::update(float dt)
 		p.color = random_color ? random_vector<glm::vec4>() : glm::lerp(particle_color0, particle_color1, uniform_random());
 		p.acceleration = acceleration;
 		p.size = particle_size;
-		p.flipbook_index = random_int_in_range(0, flipbook_size.x * flipbook_size.y);
+		p.flipbook_index = flipbook_index; //random_int_in_range(0, flipbook_size.x * flipbook_size.y);
 		time_until_spawn += 1.0f / emission_rate;	
 	}
 }
@@ -67,25 +68,41 @@ void ParticleSystem::draw_ui()
 	ImGui::SameLine();
 	ImGui::Text("counter = %d", counter);
 
-	if (texture)
+	// Widgets: Combo Box (Dropdown)
+// - The BeginCombo()/EndCombo() api allows you to manage your contents and selection state however you want it, by creating e.g. Selectable() items.
+// - The old Combo() api are helpers over BeginCombo()/EndCombo() which are kept available for convenience purpose. This is analogous to how ListBox are created.
+	if (ImGui::BeginCombo("texture", texture ? texture->name : "NONE"))
 	{
-		static bool show_texture_preview = false;
-		if (ImGui::Button("Texture preview"))
-			show_texture_preview = true;
-
-		if (show_texture_preview)
+		assert(renderer);
+		for (const auto& t : renderer->texture_catalog->textures)
 		{
-			ImGui::Begin("Texture preview", &show_texture_preview);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
-			glm::vec2 uv_scale = glm::vec2(1.0f / glm::vec2(flipbook_size));
-			glm::vec2 uv_offset = glm::vec2(uv_scale.x * (flipbook_index % flipbook_size.x), uv_scale.y * (flipbook_index / flipbook_size.x));
-			glm::vec2 uv0 = uv_offset;
-			glm::vec2 uv1 = uv_offset + uv_scale;
-			ImGui::Image(texture->descriptor_set, ImVec2(texture->texture->width, texture->texture->height), ImVec2(uv0.x, uv0.y), ImVec2(uv1.x, uv1.y));
-			if (ImGui::Button("Close"))
-				show_texture_preview = false;
-			ImGui::End();
+			bool is_selected = texture == &t.second;
+			if (ImGui::Selectable(t.first.c_str(), is_selected))
+				texture = &t.second;
 		}
 
+		ImGui::EndCombo();
+	}
+	if (texture)
+	{
+		//static bool show_texture_preview = false;
+		//if (ImGui::Button("Texture preview"))
+		//	show_texture_preview = true;
+
+		//if (show_texture_preview)
+		//{
+		//	ImGui::Begin("Texture preview", &show_texture_preview);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
+		//	glm::vec2 uv_scale = glm::vec2(1.0f / glm::vec2(flipbook_size));
+		//	glm::vec2 uv_offset = glm::vec2(uv_scale.x * (flipbook_index % flipbook_size.x), uv_scale.y * (flipbook_index / flipbook_size.x));
+		//	glm::vec2 uv0 = uv_offset;
+		//	glm::vec2 uv1 = uv_offset + uv_scale;
+		//	ImGui::Image(texture->descriptor_set, ImVec2(texture->width, texture->height), ImVec2(uv0.x, uv0.y), ImVec2(uv1.x, uv1.y));
+		//	if (ImGui::Button("Close"))
+		//		show_texture_preview = false;
+		//	ImGui::End();
+		//}
+
+		ImGui::Checkbox("use flipbook animation", &use_flipbook_animation);
 		ImGui::DragInt2("flipbook size", glm::value_ptr(flipbook_size), 1.0f, 1, 16);
 		ImGui::DragInt("flipbook index", &flipbook_index, 1.0f, 0, flipbook_size.x * flipbook_size.y - 1);
 	}
@@ -164,7 +181,7 @@ void ParticleRenderer::render(VkCommandBuffer command_buffer, const ParticleSyst
 {
 	GraphicsPipelineAsset* render_pipeline = particle_system.blend_mode == ParticleSystem::ADDITIVE ? additive_blend_pipeline : alpha_blend_pipeline;
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
-	const Texture* tex = particle_system.texture ? particle_system.texture->texture : white_texture;
+	const Texture* tex = particle_system.texture ? particle_system.texture : white_texture;
 	DescriptorInfo descriptor_info[] = {
 		DescriptorInfo(shader_globals),
 		DescriptorInfo(texture_sampler),
@@ -185,18 +202,14 @@ void ParticleRenderer::render(VkCommandBuffer command_buffer, const ParticleSyst
 		pc.flipbook_size = particle_system.flipbook_size;
 		pc.size = p.size;
 		pc.normalized_lifetime = glm::clamp(p.lifetime * inv_particle_lifetime, 0.0f, 1.0f);
-		int flipbook_offset = std::min((int)(pc.normalized_lifetime * flipbook_range), flipbook_range - 1);
-		pc.flipbook_index = (p.flipbook_index + flipbook_offset) % flipbook_range;
+		pc.flipbook_index = p.flipbook_index;
+		if (particle_system.use_flipbook_animation)
+		{
+			int flipbook_offset = std::min((int)((1.0f - pc.normalized_lifetime) * flipbook_range), flipbook_range - 1);
+			pc.flipbook_index = (pc.flipbook_index + flipbook_offset) % flipbook_range;
+		}
+
 		vkCmdPushConstants(command_buffer, render_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
 		vkCmdDraw(command_buffer, 6, 1, 0, 0);
 	}
-}
-
-void ParticleRenderer::add_texture(const Texture* tex)
-{
-	VkDescriptorSet descriptor_set = ImGui_ImplVulkan_AddTexture(texture_sampler, tex->view, tex->layout);
-	ParticleTexture pt{};
-	pt.texture = tex;
-	pt.descriptor_set = descriptor_set;
-	textures.push_back(pt);
 }

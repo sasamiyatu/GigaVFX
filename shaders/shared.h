@@ -9,6 +9,9 @@
 using namespace glm;
 
 #define FUNC_QUALIFIER inline
+using uint2 = glm::uvec2;
+using uint3 = glm::uvec3;
+using uint4 = glm::uvec4;
 
 #else
 
@@ -49,8 +52,10 @@ struct PushCostantsParticles
 {
     float4 position;
     float4 color;
+    uint2 flipbook_size;
     float size;
     float normalized_lifetime;
+    uint flipbook_index;
 };
 
 struct ShaderGlobals

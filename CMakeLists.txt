@@ -86,6 +86,9 @@ add_executable(gigasticle
     src/spirv_reflect.cpp
     src/stb_image.h
     src/texture.h
+    src/texture.cpp
+    src/texture_catalog.h
+    src/texture_catalog.cpp
     src/VkBootstrap.h
     src/VkBootstrap.cpp
     src/VkBootstrapDispatch.h

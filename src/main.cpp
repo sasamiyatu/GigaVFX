@@ -27,13 +27,14 @@
 #include "graphics_context.h"
 #include "particle_system.h"
 #include "random.h"
+#include "texture_catalog.h"    
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
 #include "imgui/imgui_impl_vulkan.h"
 
-constexpr uint32_t WINDOW_WIDTH = 1280;
-constexpr uint32_t WINDOW_HEIGHT = 720;
+constexpr uint32_t WINDOW_WIDTH = 1920;
+constexpr uint32_t WINDOW_HEIGHT = 1080;
 
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
 
@@ -86,6 +87,7 @@ bool init_imgui()
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    io.ConfigWindowsMoveFromTitleBarOnly = true;
 
     ImGui_ImplSDL2_InitForVulkan(ctx.window);
 
@@ -105,6 +107,37 @@ struct MeshInstance
     glm::mat4 transform;
     uint32_t mesh_index;
 };
+
+namespace Input
+{
+#define MAX_KEYS 512
+    uint8_t prev_keys[MAX_KEYS];
+    uint8_t curr_keys[MAX_KEYS];
+
+    void update()
+    {
+        memcpy(prev_keys, curr_keys, MAX_KEYS);
+        int numkeys;
+        const uint8_t* keys = SDL_GetKeyboardState(&numkeys);
+        memcpy(curr_keys, keys, numkeys);
+    }
+
+    bool get_key_pressed(SDL_Scancode scancode)
+    {
+        return curr_keys[scancode] && !prev_keys[scancode];
+    }
+
+    bool get_key_released(SDL_Scancode scancode)
+    {
+        return !curr_keys[scancode] && prev_keys[scancode];
+    }
+
+    bool get_key_down(SDL_Scancode scancode)
+    {
+        return curr_keys[scancode];
+    }
+}
+
 
 int main(int argc, char** argv)
 {
@@ -260,34 +293,21 @@ int main(int argc, char** argv)
 
     float slider[4] = {};
 
+    TextureCatalog texture_catalog;
+    texture_catalog.init(&ctx, "data/textures/");
+
     ParticleRenderer particle_renderer;
     particle_renderer.init(&ctx, globals_buffer.buffer, ctx.swapchain.image_format);
+    particle_renderer.texture_catalog = &texture_catalog;
 
-    Texture particle_texture{};
-    if (!load_texture_from_file("data/particles-single.png", particle_texture))
-    {
-        LOG_ERROR("Failed to load texture!");
-        exit(EXIT_FAILURE);
-    }
-    
-    Texture flipbook_texture{};
-    if (!load_texture_from_file("data/particles-flipbook.png", flipbook_texture))
-    {
-        LOG_ERROR("Failed to load texture!");
-        exit(EXIT_FAILURE);
-    }
-
-    ctx.create_textures(&particle_texture, 1);
-    ctx.create_textures(&flipbook_texture, 1);
-    particle_renderer.add_texture(&particle_texture);
-    particle_renderer.add_texture(&flipbook_texture);
-    
     ParticleSystem particle_system;
-    particle_system.texture = &particle_renderer.textures[1];
+    particle_system.texture = texture_catalog.get_texture("particles-single.png");
+    particle_system.renderer = &particle_renderer;
 
     std::vector<MeshInstance> mesh_draws;
 
     bool running = true;
+    bool texture_catalog_open = true;
     while (running)
     {
         VkCommandBuffer command_buffer = ctx.begin_frame();
@@ -341,7 +361,17 @@ int main(int argc, char** argv)
             }
         }
 
-#if 0 
+        Input::update();
+        if (Input::get_key_pressed(SDL_SCANCODE_F1))
+        {
+            texture_catalog_open = !texture_catalog_open;
+        }
+
+        if (texture_catalog_open)
+        {
+            texture_catalog.draw_ui(&texture_catalog_open);
+        }
+#if 0
         // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
         {
 
@@ -699,8 +729,7 @@ int main(int argc, char** argv)
     vkDestroyImageView(ctx.device, shadowmap_texture.view, nullptr);
     vmaDestroyImage(ctx.allocator, depth_texture.image, depth_texture.allocation);
     vkDestroyImageView(ctx.device, depth_texture.view, nullptr);
-    particle_texture.destroy(ctx.device, ctx.allocator);
-    flipbook_texture.destroy(ctx.device, ctx.allocator);
+    texture_catalog.shutdown();
     for (auto& m : meshes)
     {
         vmaDestroyBuffer(ctx.allocator, m.indices.buffer, m.indices.allocation);

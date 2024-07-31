@@ -56,6 +56,8 @@ void cs_main( uint3 thread_id : SV_DispatchThreadID )
 
         float3 color = scattering;
         color += GetSunDisc(ray.direction, sun_dir) * sun_radiance * 1000.0 * transmittance.w;
+
+        //color = 0.5;
         color = linear_to_srgb(color);
 
         out_texture[thread_id.xy] = float4(color, 1.0);
