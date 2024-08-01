@@ -58,6 +58,11 @@ struct PushCostantsParticles
     uint flipbook_index;
 };
 
+struct PushConstantsTonemap
+{
+    uint2 size;
+};
+
 struct ShaderGlobals
 {
     float4x4 view;

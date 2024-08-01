@@ -199,8 +199,7 @@ PSOutput fs_main(VSOutput input)
     float3 ambient = material_context.basecolor.rgb * 0.04;
     float3 radiance = (Fr + Fd) * NdotL * shadow + ambient;
     //radiance = rgb_to_luminance(radiance) * cascade_colors[int(cascade)];
-    float3 final_output = linear_to_srgb(radiance);
-    output.color = float4(final_output, 1.0);
+    output.color = float4(radiance, 1.0);
     //output.color.rgb = N * 0.5 + 0.5;
 
     return output;

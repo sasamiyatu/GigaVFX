@@ -38,6 +38,8 @@ constexpr uint32_t WINDOW_HEIGHT = 1080;
 
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
 
+constexpr VkFormat RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
+
 struct CameraState
 {
     glm::vec3 position = glm::vec3(0.0f);
@@ -216,11 +218,14 @@ int main(int argc, char** argv)
     Texture shadowmap_texture;
     ctx.create_texture(shadowmap_texture, 2048, 2048, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1, 4);
 
+    Texture hdr_render_target;
+    ctx.create_texture(hdr_render_target, WINDOW_WIDTH, WINDOW_HEIGHT, 1, RENDER_TARGET_FORMAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+
     GraphicsPipelineBuilder pipeline_builder(ctx.device, true);
     pipeline_builder
         .set_vertex_shader_filepath("forward.hlsl")
         .set_fragment_shader_filepath("forward.hlsl")
-        .add_color_attachment(ctx.swapchain.image_format)
+        .add_color_attachment(RENDER_TARGET_FORMAT)
         .set_cull_mode(VK_CULL_MODE_NONE)
         .set_depth_format(VK_FORMAT_D32_SFLOAT)
         .set_depth_test(VK_TRUE)
@@ -251,6 +256,14 @@ int main(int argc, char** argv)
         .set_shader_filepath("procedural_sky.hlsl");
     ComputePipelineAsset* procedural_skybox_pipeline = new ComputePipelineAsset(compute_builder);
     AssetCatalog::register_asset(procedural_skybox_pipeline);
+
+    ComputePipelineAsset* tonemap_pipeline = nullptr;
+    {
+        ComputePipelineBuilder compute_builder(ctx.device, true);
+        compute_builder.set_shader_filepath("tonemap.hlsl");
+        tonemap_pipeline = new ComputePipelineAsset(compute_builder);
+        AssetCatalog::register_asset(tonemap_pipeline);
+    }
 
     meshes.resize(gltf_data->meshes_count);
     load_meshes(ctx, gltf_data, meshes.data(), meshes.size());
@@ -297,7 +310,7 @@ int main(int argc, char** argv)
     texture_catalog.init(&ctx, "data/textures/");
 
     ParticleRenderer particle_renderer;
-    particle_renderer.init(&ctx, globals_buffer.buffer, ctx.swapchain.image_format);
+    particle_renderer.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT);
     particle_renderer.texture_catalog = &texture_catalog;
 
     ParticleSystem particle_system;
@@ -543,10 +556,28 @@ int main(int argc, char** argv)
             vkCmdPipelineBarrier2(command_buffer, &dep_info);
         }
 
+        { // Transition render target
+            VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                0,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_GENERAL,
+                hdr_render_target.image,
+                VK_IMAGE_ASPECT_COLOR_BIT
+            );
+
+            VkDependencyInfo dep_info{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            dep_info.imageMemoryBarrierCount = 1;
+            dep_info.pImageMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(command_buffer, &dep_info);
+        }
+
         { // Procedural sky box
             DescriptorInfo descriptor_info[] = {
                 DescriptorInfo(globals_buffer.buffer),
-                DescriptorInfo(swapchain_texture.view, VK_IMAGE_LAYOUT_GENERAL)
+                DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL)
             };
 
             vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, procedural_skybox_pipeline->pipeline.descriptor_update_template, procedural_skybox_pipeline->pipeline.layout, 0, descriptor_info);
@@ -641,7 +672,7 @@ int main(int argc, char** argv)
 
         { // Forward pass
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-            color_info.imageView = swapchain_texture.view;
+            color_info.imageView = hdr_render_target.view;
             color_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
             color_info.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             color_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -710,16 +741,59 @@ int main(int argc, char** argv)
 
         particle_renderer.render(command_buffer, particle_system);
 
+        vkCmdEndRendering(command_buffer);
+
+        {
+            DescriptorInfo descriptor_info[] = {
+                DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
+                DescriptorInfo(swapchain_texture.view, VK_IMAGE_LAYOUT_GENERAL)
+            };
+
+            PushConstantsTonemap pc{};
+            pc.size = glm::uvec2(WINDOW_WIDTH, WINDOW_HEIGHT);
+
+            vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, tonemap_pipeline->pipeline.descriptor_update_template, tonemap_pipeline->pipeline.layout, 0, descriptor_info);
+            vkCmdPushConstants(command_buffer, tonemap_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, tonemap_pipeline->pipeline.pipeline);
+
+            uint32_t dispatch_x = get_golden_dispatch_size(WINDOW_WIDTH);
+            uint32_t dispatch_y = get_golden_dispatch_size(WINDOW_HEIGHT);
+            vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
+        }
+
         {
             // ImGui rendering
+            VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            color_info.imageView = swapchain_texture.view;
+            color_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            color_info.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            color_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+            VkRenderingAttachmentInfo depth_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            depth_info.imageView = depth_texture.view;
+            depth_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            depth_info.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            depth_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            depth_info.clearValue.depthStencil.depth = 1.0f;
+
+            VkRenderingInfo rendering_info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+            rendering_info.renderArea = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+            rendering_info.layerCount = 1;
+            rendering_info.viewMask = 0;
+            rendering_info.colorAttachmentCount = 1;
+            rendering_info.pColorAttachments = &color_info;
+            rendering_info.pDepthAttachment = &depth_info;
+
+            vkCmdBeginRendering(command_buffer, &rendering_info);
+
             ImGui::Render();
             ImDrawData* draw_data = ImGui::GetDrawData();
 
             // Record dear imgui primitives into command buffer
             ImGui_ImplVulkan_RenderDrawData(draw_data, command_buffer);
-        }
 
-        vkCmdEndRendering(command_buffer);
+            vkCmdEndRendering(command_buffer);
+        }
 
         ctx.end_frame(command_buffer);
     }
@@ -729,6 +803,7 @@ int main(int argc, char** argv)
     vkDestroyImageView(ctx.device, shadowmap_texture.view, nullptr);
     vmaDestroyImage(ctx.allocator, depth_texture.image, depth_texture.allocation);
     vkDestroyImageView(ctx.device, depth_texture.view, nullptr);
+    hdr_render_target.destroy(ctx.device, ctx.allocator);
     texture_catalog.shutdown();
     for (auto& m : meshes)
     {
@@ -752,6 +827,7 @@ int main(int argc, char** argv)
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
+    tonemap_pipeline->builder.destroy_resources(tonemap_pipeline->pipeline);
     particle_renderer.shutdown();
 
     ctx.shutdown();

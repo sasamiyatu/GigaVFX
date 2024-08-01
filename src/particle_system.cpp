@@ -54,7 +54,7 @@ void ParticleSystem::draw_ui()
 	ImGui::DragFloat3("emitter position", glm::value_ptr(position), 0.1f, -1000.0f, 1000.0f);
 	ImGui::DragFloat("particle lifetime", &particle_lifetime, 0.1f, 0.0f, 100.0f);
 	ImGui::DragFloat("particle size", &particle_size, 0.01f, 0.0f, 100.0f);
-	ImGui::DragFloat("emission rate", &emission_rate, 0.1f, 0.0f, 1000.0f);
+	if (ImGui::DragFloat("emission rate", &emission_rate, 0.1f, 0.0f, 1000.0f)) time_until_spawn = 1.0f / emission_rate;
 	ImGui::DragFloat("initial speed", &initial_speed, 0.1f, 0.0f, 1000.0f);
 	ImGui::DragFloat3("acceleration", glm::value_ptr(acceleration), 0.1f, -100.0f, 100.0f);
 

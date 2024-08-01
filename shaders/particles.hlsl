@@ -66,7 +66,8 @@ PSOutput fs_main(VSOutput input)
     float4 tex = texture.Sample(texture_sampler, input.uv);
     tex.rgb = srgb_to_linear(tex.rgb);
 
-    output.color = tex * float4(input.color.rgb, push_constants.normalized_lifetime);
+    output.color = tex * float4(srgb_to_linear(input.color.rgb), push_constants.normalized_lifetime);
+    //output.color.a = tex.a;
 
     return output;
 }
