@@ -316,6 +316,7 @@ int main(int argc, char** argv)
     ParticleSystem particle_system;
     particle_system.texture = texture_catalog.get_texture("particles-single.png");
     particle_system.renderer = &particle_renderer;
+    particle_system.load("data/default.particle_system");
 
     std::vector<MeshInstance> mesh_draws;
 

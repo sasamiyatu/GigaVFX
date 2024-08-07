@@ -7,6 +7,8 @@
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_vulkan.h"
 #include "texture_catalog.h"
+#include <fstream>
+#include <sstream>
 
 void ParticleSystem::update(float dt)
 {
@@ -63,11 +65,6 @@ void ParticleSystem::draw_ui()
 	ImGui::ColorEdit4("color 1", (float*)&particle_color1);
 	ImGui::Checkbox("randomize color", &random_color);
 
-	if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-		counter++;
-	ImGui::SameLine();
-	ImGui::Text("counter = %d", counter);
-
 	// Widgets: Combo Box (Dropdown)
 // - The BeginCombo()/EndCombo() api allows you to manage your contents and selection state however you want it, by creating e.g. Selectable() items.
 // - The old Combo() api are helpers over BeginCombo()/EndCombo() which are kept available for convenience purpose. This is analogous to how ListBox are created.
@@ -110,9 +107,179 @@ void ParticleSystem::draw_ui()
 	static const char* items[]{ "Additive blend", "Alpha blend"};
 	ImGui::Combo("blend mode", &blend_mode, items, IM_ARRAYSIZE(items));
 
+
+	if (ImGui::Button("Save"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
+	{
+		const char* path = "data/default.particle_system";
+		save(path);
+	}
+
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 
 	ImGui::End();
+}
+
+std::ostream& operator<<(std::ostream& os, const glm::vec4& v)
+{
+	return os << v.x << " " << v.y << " " << v.z << " " << v.w;
+}
+
+std::ostream& operator<<(std::ostream& os, const glm::vec3& v)
+{
+	return os << v.x << " " << v.y << " " << v.z;
+}
+
+std::ostream& operator<<(std::ostream& os, const glm::ivec2& v)
+{
+	return os << v.x << " " << v.y;
+}
+
+std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
+{
+	os << "position: " << ps.position << "\n";
+	os << "lifetime: " << ps.lifetime << "\n";
+	os << "emission_rate: " << ps.emission_rate << "\n";
+	os << "cone_angle: " << ps.cone_angle << "\n";
+	os << "particle_color0: " << ps.particle_color0 << "\n";
+	os << "particle_color1: " << ps.particle_color1 << "\n";
+	os << "initial_speed: " << ps.initial_speed << "\n";
+	os << "acceleration: " << ps.acceleration << "\n";
+	os << "particle_lifetime: " << ps.particle_lifetime << "\n";
+	os << "particle_size: " << ps.particle_size << "\n";
+	os << "random_color: " << ps.random_color << "\n";
+	os << "use_flipbook_animation: " << ps.use_flipbook_animation << "\n";
+	os << "flipbook_size: " << ps.flipbook_size << "\n";
+	os << "flipbook_index: " << ps.flipbook_index << "\n";
+
+	if (ps.texture) os << "texture: " << ps.texture->name;
+
+	return os;
+}
+
+bool ParticleSystem::save(const char* filepath)
+{
+	std::ofstream file(filepath);
+
+	if (!file.is_open()) 
+	{
+		LOG_ERROR("Failed to write file %s", filepath);
+		return false;
+	}
+
+	file << *this;
+	return true;
+}
+
+bool ParticleSystem::load(const char* filepath)
+{
+	std::fstream file(filepath);
+	std::vector<std::string> split;
+	int line_count = 0;
+
+	for (std::string line; std::getline(file, line);)
+	{
+		++line_count;
+		split.clear();
+		size_t colon = line.find_first_of(':');
+		if (colon == std::string::npos)
+		{
+			LOG_ERROR("Error parsing file %s", filepath);
+			return false;
+		}
+
+		std::string parameter = line.substr(0, colon);
+		std::stringstream ss(line.substr(line.find_first_not_of(' ', colon + 1)));
+		for (std::string token; std::getline(ss, token, ' ');)
+		{
+			split.push_back(token);
+		}
+
+		if (parameter == "position")
+		{
+			if (split.size() != 3)
+			{
+				LOG_ERROR("Error parsing file %s!", filepath);
+				return false;
+			}
+			for (int i = 0; i < 3; ++i) position[i] = (float)std::atof(split[i].c_str());
+		}
+		else if (parameter == "lifetime")
+		{
+			if (split.size() != 1) goto error;
+			lifetime = (float)std::atof(split[0].c_str());
+		}
+		else if (parameter == "emission_rate")
+		{
+			if (split.size() != 1) goto error;
+			emission_rate = (float)std::atof(split[0].c_str());
+		}
+		else if (parameter == "cone_angle")
+		{
+			if (split.size() != 1) goto error;
+			cone_angle = (float)std::atof(split[0].c_str());
+		}
+		else if (parameter == "particle_color0")
+		{
+			if (split.size() != 4) goto error;
+			for (int i = 0; i < 4; ++i) particle_color0[i] = (float)std::atof(split[i].c_str());
+		}
+		else if (parameter == "particle_color1")
+		{
+			if (split.size() != 4) goto error;
+			for (int i = 0; i < 4; ++i) particle_color1[i] = (float)std::atof(split[i].c_str());
+		}
+		else if (parameter == "initial_speed")
+		{
+			if (split.size() != 1) goto error;
+			initial_speed = (float)std::atof(split[0].c_str());
+		}
+		else if (parameter == "acceleration")
+		{
+			if (split.size() != 3) goto error;
+			for (int i = 0; i < 3; ++i) acceleration[i] = (float)std::atof(split[i].c_str());
+		}
+		else if (parameter == "particle_lifetime")
+		{
+			if (split.size() != 1) goto error;
+			particle_lifetime = (float)std::atof(split[0].c_str());
+		}
+		else if (parameter == "particle_size")
+		{
+			if (split.size() != 1) goto error;
+			particle_size = (float)std::atof(split[0].c_str());
+		}
+		else if (parameter == "random_color")
+		{
+			if (split.size() != 1) goto error;
+			random_color = (bool)std::atoi(split[0].c_str());
+		}
+		else if (parameter == "texture")
+		{
+			texture = renderer->texture_catalog->get_texture(split[0].c_str());
+			if (!texture) LOG_ERROR("Failed to find texture %s!", split[0].c_str());
+		}
+		else if (parameter == "use_flipbook_animation")
+		{
+			if (split.size() != 1) goto error;
+			use_flipbook_animation = (bool)std::atoi(split[0].c_str());
+		}
+		else if (parameter == "flipbook_size")
+		{
+			if (split.size() != 2) goto error;
+			for (int i = 0; i < 2; ++i) flipbook_size[i] = std::atoi(split[i].c_str());
+		}
+		else if (parameter == "flipbook_index")
+		{
+			if (split.size() != 1) goto error;
+			flipbook_index = std::atoi(split[0].c_str());
+		}
+	}
+
+	return true;
+
+error:
+	LOG_ERROR("Error parsing file %s on line %d!", filepath, line_count);
+	return false;
 }
 
 void ParticleRenderer::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format)

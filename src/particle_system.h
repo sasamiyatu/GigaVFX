@@ -75,6 +75,7 @@ struct ParticleSystem
 	float time_until_spawn = 0.0f;
 
 	void update(float dt);
-
 	void draw_ui();
+	bool save(const char* filepath);
+	bool load(const char* filepath);
 };

@@ -28,7 +28,7 @@ void TextureCatalog::init(Context* ctx, const char* texture_directory)
 			}
 
 			ctx->create_textures(&texture, 1);
-			textures.insert(std::make_pair(name, texture));
+			textures.insert(std::make_pair(f.path().string(), texture));
 		}
 	}
 }

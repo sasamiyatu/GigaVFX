@@ -163,14 +163,7 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_topology(VkPrimitiveTopolo
 
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_blend_preset(BlendPreset preset)
 {
-    /*    VkBool32                 blendEnable;
-    VkBlendFactor            srcColorBlendFactor;
-    VkBlendFactor            dstColorBlendFactor;
-    VkBlendOp                colorBlendOp;
-    VkBlendFactor            srcAlphaBlendFactor;
-    VkBlendFactor            dstAlphaBlendFactor;
-    VkBlendOp                alphaBlendOp;
-    VkColorComponentFlags    colorWriteMask;*/
+
     switch (preset)
     {
     case BlendPreset::ALPHA:
