@@ -313,10 +313,8 @@ int main(int argc, char** argv)
     particle_renderer.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT);
     particle_renderer.texture_catalog = &texture_catalog;
 
-    ParticleSystem particle_system;
-    particle_system.texture = texture_catalog.get_texture("particles-single.png");
-    particle_system.renderer = &particle_renderer;
-    particle_system.load("data/default.particle_system");
+    ParticleSystemManager particle_system_manager;
+    particle_system_manager.init(&particle_renderer);
 
     std::vector<MeshInstance> mesh_draws;
 
@@ -385,31 +383,8 @@ int main(int argc, char** argv)
         {
             texture_catalog.draw_ui(&texture_catalog_open);
         }
-#if 0
-        // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
-        {
 
-            static float f = 0.0f;
-            static int counter = 0;
-
-            ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
-            ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-            if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-                counter++;
-            ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
-
-            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-
-            ImGui::End();
-        }
-#endif
-        particle_system.draw_ui();
+        particle_system_manager.draw_ui();
 
         movement_speed = std::max(movement_speed, 0.0f);
 
@@ -433,12 +408,15 @@ int main(int argc, char** argv)
         camera.forward = -rotation[2];
 
         glm::vec3 movement = glm::vec3(0.0f);
-        if (keyboard[SDL_SCANCODE_W])       movement.z -= 1.0f;
-        if (keyboard[SDL_SCANCODE_S])       movement.z += 1.0f;
-        if (keyboard[SDL_SCANCODE_A])       movement.x -= 1.0f;
-        if (keyboard[SDL_SCANCODE_D])       movement.x += 1.0f;
-        if (keyboard[SDL_SCANCODE_SPACE])   movement.y += 1.0f;
-        if (keyboard[SDL_SCANCODE_LCTRL])   movement.y -= 1.0f;
+        if (!io.WantCaptureKeyboard)
+        {
+            if (keyboard[SDL_SCANCODE_W])       movement.z -= 1.0f;
+            if (keyboard[SDL_SCANCODE_S])       movement.z += 1.0f;
+            if (keyboard[SDL_SCANCODE_A])       movement.x -= 1.0f;
+            if (keyboard[SDL_SCANCODE_D])       movement.x += 1.0f;
+            if (keyboard[SDL_SCANCODE_SPACE])   movement.y += 1.0f;
+            if (keyboard[SDL_SCANCODE_LCTRL])   movement.y -= 1.0f;
+        }
 
         if (glm::length(movement) != 0.0f) movement = glm::normalize(movement);
 
@@ -446,7 +424,7 @@ int main(int argc, char** argv)
         double delta_time = (tick - current_tick) * inv_pfreq;
         current_tick = tick;
 
-        particle_system.update((float)delta_time);
+        particle_system_manager.update((float)delta_time);
 
         static float hot_reload_timer = 0.0f;
         hot_reload_timer += delta_time;
@@ -740,7 +718,7 @@ int main(int argc, char** argv)
             }
         }
 
-        particle_renderer.render(command_buffer, particle_system);
+        particle_system_manager.render(command_buffer);
 
         vkCmdEndRendering(command_buffer);
 

@@ -16,5 +16,4 @@ struct TextureCatalog
 
 	std::map<std::string, Texture> textures;
 	Context* context;
-
 };

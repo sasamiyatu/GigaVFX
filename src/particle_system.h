@@ -1,15 +1,32 @@
 #pragma once
 #include "defines.h"
 #include <vector>
+#include <unordered_map>
 
 #define MAX_PARTICLES 512
 
 struct ParticleSystem;
+struct ParticleRenderer;
 
 struct Context;
 struct GraphicsPipelineAsset;
 struct Texture;
 struct TextureCatalog;
+
+#define PARTICLE_SYSTEM_DIRECTORY "data/particle_systems"
+
+struct ParticleSystemManager
+{
+	ParticleSystem* active_system = nullptr;
+	std::unordered_map<std::string, ParticleSystem*> catalog;
+	const char* directory = nullptr;
+	ParticleRenderer* renderer;
+
+	void init(ParticleRenderer* renderer);
+	void draw_ui();
+	void update(float dt);
+	void render(VkCommandBuffer cmd);
+};
 
 struct ParticleRenderer
 {
@@ -39,10 +56,14 @@ struct Particle
 	int flipbook_index;
 };
 
+#define MAX_NAME_LENGTH 64
+
 struct ParticleSystem
 {
 	Particle particles[MAX_PARTICLES];
 	uint32_t particle_count = 0;
+
+	char name[64] = { 0 };
 
 	glm::vec3 position = glm::vec3(0.0f);
 
@@ -74,8 +95,9 @@ struct ParticleSystem
 
 	float time_until_spawn = 0.0f;
 
+	ParticleSystem(ParticleRenderer* renderer);
 	void update(float dt);
 	void draw_ui();
-	bool save(const char* filepath);
+	bool save();
 	bool load(const char* filepath);
 };

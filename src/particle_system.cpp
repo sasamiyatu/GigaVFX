@@ -10,6 +10,12 @@
 #include <fstream>
 #include <sstream>
 
+ParticleSystem::ParticleSystem(ParticleRenderer* renderer)
+	: renderer(renderer)
+{
+
+}
+
 void ParticleSystem::update(float dt)
 {
 	for (uint32_t i = 0; i < particle_count;)
@@ -49,9 +55,9 @@ void ParticleSystem::draw_ui()
 
 	static int counter = 0;
 
-	ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
 	ImGui::Text("Particle system settings");               // Display some text (you can use a format strings too)
+
+	ImGui::InputText("name", name, std::size(name));
 
 	ImGui::DragFloat3("emitter position", glm::value_ptr(position), 0.1f, -1000.0f, 1000.0f);
 	ImGui::DragFloat("particle lifetime", &particle_lifetime, 0.1f, 0.0f, 100.0f);
@@ -65,9 +71,6 @@ void ParticleSystem::draw_ui()
 	ImGui::ColorEdit4("color 1", (float*)&particle_color1);
 	ImGui::Checkbox("randomize color", &random_color);
 
-	// Widgets: Combo Box (Dropdown)
-// - The BeginCombo()/EndCombo() api allows you to manage your contents and selection state however you want it, by creating e.g. Selectable() items.
-// - The old Combo() api are helpers over BeginCombo()/EndCombo() which are kept available for convenience purpose. This is analogous to how ListBox are created.
 	if (ImGui::BeginCombo("texture", texture ? texture->name : "NONE"))
 	{
 		assert(renderer);
@@ -82,23 +85,6 @@ void ParticleSystem::draw_ui()
 	}
 	if (texture)
 	{
-		//static bool show_texture_preview = false;
-		//if (ImGui::Button("Texture preview"))
-		//	show_texture_preview = true;
-
-		//if (show_texture_preview)
-		//{
-		//	ImGui::Begin("Texture preview", &show_texture_preview);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
-		//	glm::vec2 uv_scale = glm::vec2(1.0f / glm::vec2(flipbook_size));
-		//	glm::vec2 uv_offset = glm::vec2(uv_scale.x * (flipbook_index % flipbook_size.x), uv_scale.y * (flipbook_index / flipbook_size.x));
-		//	glm::vec2 uv0 = uv_offset;
-		//	glm::vec2 uv1 = uv_offset + uv_scale;
-		//	ImGui::Image(texture->descriptor_set, ImVec2(texture->width, texture->height), ImVec2(uv0.x, uv0.y), ImVec2(uv1.x, uv1.y));
-		//	if (ImGui::Button("Close"))
-		//		show_texture_preview = false;
-		//	ImGui::End();
-		//}
-
 		ImGui::Checkbox("use flipbook animation", &use_flipbook_animation);
 		ImGui::DragInt2("flipbook size", glm::value_ptr(flipbook_size), 1.0f, 1, 16);
 		ImGui::DragInt("flipbook index", &flipbook_index, 1.0f, 0, flipbook_size.x * flipbook_size.y - 1);
@@ -110,13 +96,11 @@ void ParticleSystem::draw_ui()
 
 	if (ImGui::Button("Save"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
 	{
-		const char* path = "data/default.particle_system";
-		save(path);
+		save();
 	}
 
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 
-	ImGui::End();
 }
 
 std::ostream& operator<<(std::ostream& os, const glm::vec4& v)
@@ -150,14 +134,22 @@ std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
 	os << "use_flipbook_animation: " << ps.use_flipbook_animation << "\n";
 	os << "flipbook_size: " << ps.flipbook_size << "\n";
 	os << "flipbook_index: " << ps.flipbook_index << "\n";
+	os << "name: " << ps.name << "\n";
 
 	if (ps.texture) os << "texture: " << ps.texture->name;
 
 	return os;
 }
 
-bool ParticleSystem::save(const char* filepath)
+bool ParticleSystem::save()
 {
+	if (strlen(name) == 0)
+	{
+		LOG_ERROR("Failed to save particle system: no name set!");
+		return false;
+	}
+
+	std::filesystem::path filepath = std::filesystem::path(PARTICLE_SYSTEM_DIRECTORY) / std::filesystem::path(std::string(name) + ".particle_system");
 	std::ofstream file(filepath);
 
 	if (!file.is_open()) 
@@ -273,6 +265,11 @@ bool ParticleSystem::load(const char* filepath)
 			if (split.size() != 1) goto error;
 			flipbook_index = std::atoi(split[0].c_str());
 		}
+		else if (parameter == "name")
+		{
+			if (split.size() != 1) goto error;
+			strncpy(name, split[0].c_str(), std::size(name) - 1);
+		}
 	}
 
 	return true;
@@ -380,3 +377,112 @@ void ParticleRenderer::render(VkCommandBuffer command_buffer, const ParticleSyst
 		vkCmdDraw(command_buffer, 6, 1, 0, 0);
 	}
 }
+
+static void reload(ParticleSystemManager& manager)
+{
+	std::filesystem::path path = manager.directory;
+	assert(std::filesystem::exists(path));
+
+	char active_name[MAX_NAME_LENGTH] = { 0 };
+	if (manager.active_system)
+	{
+		strncpy(active_name, manager.active_system->name, std::size(active_name) - 1);
+		active_name[MAX_NAME_LENGTH - 1] = 0;
+	}
+
+	for (auto& ps : manager.catalog)
+	{
+		delete ps.second;
+	}
+
+	manager.catalog.clear();
+
+	for (const auto& f : std::filesystem::directory_iterator(path))
+	{
+		if (f.is_regular_file())
+		{
+			std::filesystem::path extension = f.path().extension();
+			if (extension == ".particle_system")
+			{
+				printf("%s\n", f.path().string().c_str());
+				std::string name = f.path().filename().string();
+
+				ParticleSystem* ps = new ParticleSystem(manager.renderer);
+				if (ps->load(f.path().string().c_str()))
+				{
+					manager.catalog.insert(std::make_pair(name, ps));
+				}
+				else
+				{
+					LOG_ERROR("Failed to load particle system from %s", f.path().string().c_str());
+					delete ps;
+				}
+			}
+
+		}
+	}
+
+	manager.active_system = nullptr;
+	if (strlen(active_name) != 0)
+	{
+		for (const auto& ps : manager.catalog)
+		{
+			if (strcmp(ps.second->name, active_name) == 0)
+			{
+				manager.active_system = ps.second;
+			}
+		}
+	}
+}
+
+void ParticleSystemManager::init(ParticleRenderer* renderer)
+{
+	this->renderer = renderer;
+	this->directory = PARTICLE_SYSTEM_DIRECTORY;
+
+	reload(*this);
+}
+
+void ParticleSystemManager::draw_ui()
+{
+	ImGui::Begin("Particle editor");
+
+	if (ImGui::Button("Reload"))
+	{
+		reload(*this);
+	}
+	if (ImGui::BeginCombo("Select particle system", active_system ? active_system->name : "NONE"))
+	{
+		for (const auto& ps : catalog)
+		{
+			if (ImGui::Selectable(ps.first.c_str(), active_system == ps.second))
+			{
+				active_system = ps.second;
+			}
+		}
+
+		ImGui::EndCombo();
+	}
+
+	if (active_system)
+	{
+		active_system->draw_ui();
+	}
+
+	ImGui::End();
+}
+
+void ParticleSystemManager::update(float dt)
+{
+	if (active_system)
+		active_system->update(dt);
+}
+
+void ParticleSystemManager::render(VkCommandBuffer cmd)
+{
+	if (renderer && active_system)
+	{
+		renderer->render(cmd, *active_system);
+	}
+}
+
