@@ -49,6 +49,14 @@ void ParticleSystem::update(float dt)
 	}
 }
 
+static void set_renderer_settings(ParticleSystem& ps)
+{
+	ParticleRenderSettings settings{};
+	settings.albedo_multiplier = ps.albedo_factor;
+	settings.emission_multiplier = ps.emission_enabled ? ps.emission_factor : glm::vec4(0.0f);
+	ps.renderer->set_render_settings(settings);
+}
+
 void ParticleSystem::draw_ui()
 {
 	ImGuiIO& io = ImGui::GetIO();
@@ -71,28 +79,47 @@ void ParticleSystem::draw_ui()
 	ImGui::ColorEdit4("color 1", (float*)&particle_color1);
 	ImGui::Checkbox("randomize color", &random_color);
 
-	if (ImGui::BeginCombo("texture", texture ? texture->name : "NONE"))
+	if (ImGui::CollapsingHeader("Rendering"))
 	{
-		assert(renderer);
-		for (const auto& t : renderer->texture_catalog->textures)
+		if (ImGui::BeginCombo("Albedo", texture ? texture->name : "NONE"))
 		{
-			bool is_selected = texture == &t.second;
-			if (ImGui::Selectable(t.first.c_str(), is_selected))
-				texture = &t.second;
+			assert(renderer);
+			for (const auto& t : renderer->texture_catalog->textures)
+			{
+				bool is_selected = texture == &t.second;
+				if (ImGui::Selectable(t.first.c_str(), is_selected))
+					texture = &t.second;
+			}
+
+			ImGui::EndCombo();
+		}
+		bool color_changed = false;
+		color_changed |= ImGui::ColorEdit4("Albedo factor", glm::value_ptr(albedo_factor));
+		color_changed |= ImGui::Checkbox("Emission", &emission_enabled);
+		if (ImGui::BeginCombo("Emission map", emission_map ? emission_map->name : "NONE"))
+		{
+			assert(renderer);
+			for (const auto& t : renderer->texture_catalog->textures)
+			{
+				bool is_selected = emission_map == &t.second;
+				if (ImGui::Selectable(t.first.c_str(), is_selected))
+					emission_map = &t.second;
+			}
+
+			ImGui::EndCombo();
+		}
+		color_changed |= ImGui::ColorEdit4("Emission factor", glm::value_ptr(emission_factor));
+		if (color_changed) set_renderer_settings(*this);
+		if (texture)
+		{
+			ImGui::Checkbox("use flipbook animation", &use_flipbook_animation);
+			ImGui::DragInt2("flipbook size", glm::value_ptr(flipbook_size), 1.0f, 1, 16);
+			ImGui::DragInt("flipbook index", &flipbook_index, 1.0f, 0, flipbook_size.x * flipbook_size.y - 1);
 		}
 
-		ImGui::EndCombo();
+		static const char* items[]{ "Additive blend", "Alpha blend" };
+		ImGui::Combo("blend mode", &blend_mode, items, IM_ARRAYSIZE(items));
 	}
-	if (texture)
-	{
-		ImGui::Checkbox("use flipbook animation", &use_flipbook_animation);
-		ImGui::DragInt2("flipbook size", glm::value_ptr(flipbook_size), 1.0f, 1, 16);
-		ImGui::DragInt("flipbook index", &flipbook_index, 1.0f, 0, flipbook_size.x * flipbook_size.y - 1);
-	}
-
-	static const char* items[]{ "Additive blend", "Alpha blend"};
-	ImGui::Combo("blend mode", &blend_mode, items, IM_ARRAYSIZE(items));
-
 
 	if (ImGui::Button("Save"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
 	{
@@ -135,8 +162,13 @@ std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
 	os << "flipbook_size: " << ps.flipbook_size << "\n";
 	os << "flipbook_index: " << ps.flipbook_index << "\n";
 	os << "name: " << ps.name << "\n";
+	os << "emission: " << ps.emission_enabled << "\n";
+	os << "albedo_factor: " << ps.albedo_factor << "\n";
+	os << "emission_factor: " << ps.emission_factor << "\n";
+	os << "blend_mode: " << ps.blend_mode << "\n";
 
-	if (ps.texture) os << "texture: " << ps.texture->name;
+	if (ps.texture) os << "texture: " << ps.texture->name << "\n";
+	if (ps.emission_map) os << "emission_map: " << ps.emission_map->name << "\n";
 
 	return os;
 }
@@ -161,6 +193,8 @@ bool ParticleSystem::save()
 	file << *this;
 	return true;
 }
+
+
 
 bool ParticleSystem::load(const char* filepath)
 {
@@ -270,6 +304,32 @@ bool ParticleSystem::load(const char* filepath)
 			if (split.size() != 1) goto error;
 			strncpy(name, split[0].c_str(), std::size(name) - 1);
 		}
+		else if (parameter == "emission")
+		{
+			if (split.size() != 1) goto error;
+			emission_enabled = (bool)std::atoi(split[0].c_str());
+		}
+		else if (parameter == "emission_map")
+		{
+			if (split.size() != 1) goto error;
+			emission_map = renderer->texture_catalog->get_texture(split[0].c_str());
+			if (!emission_map) LOG_ERROR("Failed to find texture %s!", split[0].c_str());
+		}
+		else if (parameter == "blend_mode")
+		{
+			if (split.size() != 1) goto error;
+			blend_mode = (BlendMode)std::atoi(split[0].c_str());
+		}
+		else if (parameter == "albedo_factor")
+		{
+			if (split.size() != 4) goto error;
+			for (int i = 0; i < 4; ++i) albedo_factor[i] = (float)std::atof(split[i].c_str());
+		}
+		else if (parameter == "emission_factor")
+		{
+			if (split.size() != 4) goto error;
+			for (int i = 0; i < 4; ++i) emission_factor[i] = (float)std::atof(split[i].c_str());
+		}
 	}
 
 	return true;
@@ -331,6 +391,16 @@ void ParticleRenderer::init(Context* ctx, VkBuffer globals_buffer, VkFormat rend
 	alpha_blend_pipeline = new GraphicsPipelineAsset(builder);
 	AssetCatalog::register_asset(additive_blend_pipeline);
 	AssetCatalog::register_asset(alpha_blend_pipeline);
+
+	BufferDesc desc{};
+	ParticleRenderSettings default_settings{};
+	default_settings.albedo_multiplier = glm::vec4(1.0f);
+	default_settings.emission_multiplier = glm::vec4(0.0f);
+	desc.size = sizeof(ParticleRenderSettings);
+	desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+	desc.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	desc.data = &default_settings;
+	renderer_settings = ctx->create_buffer(desc);
 }
 
 void ParticleRenderer::shutdown()
@@ -339,6 +409,7 @@ void ParticleRenderer::shutdown()
 	alpha_blend_pipeline->builder.destroy_resources(alpha_blend_pipeline->pipeline);
 	vkDestroySampler(ctx->device, texture_sampler, nullptr);
 	white_texture->destroy(ctx->device, ctx->allocator);
+	vmaDestroyBuffer(ctx->allocator, renderer_settings.buffer, renderer_settings.allocation);
 }
 
 void ParticleRenderer::render(VkCommandBuffer command_buffer, const ParticleSystem& particle_system)
@@ -346,10 +417,13 @@ void ParticleRenderer::render(VkCommandBuffer command_buffer, const ParticleSyst
 	GraphicsPipelineAsset* render_pipeline = particle_system.blend_mode == ParticleSystem::ADDITIVE ? additive_blend_pipeline : alpha_blend_pipeline;
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
 	const Texture* tex = particle_system.texture ? particle_system.texture : white_texture;
+	const Texture* emissive = particle_system.emission_map ? particle_system.emission_map : white_texture;
 	DescriptorInfo descriptor_info[] = {
 		DescriptorInfo(shader_globals),
+		DescriptorInfo(renderer_settings.buffer),
 		DescriptorInfo(texture_sampler),
 		DescriptorInfo(tex->view, tex->layout),
+		DescriptorInfo(emissive->view, emissive->layout),
 	};
 
 	vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, render_pipeline->pipeline.descriptor_update_template, render_pipeline->pipeline.layout, 0, descriptor_info);
@@ -376,6 +450,14 @@ void ParticleRenderer::render(VkCommandBuffer command_buffer, const ParticleSyst
 		vkCmdPushConstants(command_buffer, render_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
 		vkCmdDraw(command_buffer, 6, 1, 0, 0);
 	}
+}
+
+void ParticleRenderer::set_render_settings(const ParticleRenderSettings& settings)
+{
+	void* mapped = nullptr;
+	vmaMapMemory(ctx->allocator, renderer_settings.allocation, &mapped);
+	memcpy(mapped, &settings, sizeof(settings));
+	vmaUnmapMemory(ctx->allocator, renderer_settings.allocation);
 }
 
 static void reload(ParticleSystemManager& manager)
@@ -458,6 +540,7 @@ void ParticleSystemManager::draw_ui()
 			if (ImGui::Selectable(ps.first.c_str(), active_system == ps.second))
 			{
 				active_system = ps.second;
+				set_renderer_settings(*active_system);
 			}
 		}
 

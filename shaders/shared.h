@@ -78,3 +78,9 @@ struct ShaderGlobals
     float4 sun_direction;
     float4 sun_color_and_intensity;
 };
+
+struct ParticleRenderSettings
+{
+    float4 albedo_multiplier;
+    float4 emission_multiplier;
+};

@@ -4,7 +4,6 @@
 #include "graphics_context.h"
 #include "stb_image.h"
 #include "../shaders/shared.h"
-
 #include <vector>
 
 size_t load_meshes(Context& ctx, const cgltf_data* gltf_data, Mesh* out_meshes, size_t count)

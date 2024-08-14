@@ -19,8 +19,13 @@ struct VSOutput
     ShaderGlobals globals;
 }
 
-[[vk::binding(1)]] SamplerState texture_sampler;
-[[vk::binding(2)]] Texture2D texture;
+[[vk::binding(1)]] cbuffer globals {
+    ParticleRenderSettings render_settings;
+}
+
+[[vk::binding(2)]] SamplerState texture_sampler;
+[[vk::binding(3)]] Texture2D texture;
+[[vk::binding(4)]] Texture2D emission_map;
 
 static const float2 offsets[4] = {
     float2(-1.0f, 1.0f),
@@ -65,8 +70,13 @@ PSOutput fs_main(VSOutput input)
     PSOutput output = (PSOutput)0;
     float4 tex = texture.Sample(texture_sampler, input.uv);
     tex.rgb = srgb_to_linear(tex.rgb);
+    //tex.rgb *= tex.a * input.color.a;
 
-    output.color = tex * float4(srgb_to_linear(input.color.rgb), push_constants.normalized_lifetime);
+    float4 emission = emission_map.Sample(texture_sampler, input.uv);
+    emission.rgb = srgb_to_linear(emission.rgb);
+
+    output.color = tex * float4(srgb_to_linear(input.color.rgb), 1.0) * float4(srgb_to_linear(render_settings.albedo_multiplier.rgb), render_settings.albedo_multiplier.a);
+    output.color.rgb += emission.rgb * srgb_to_linear(render_settings.emission_multiplier.rgb);
     //output.color.a = tex.a;
 
     return output;

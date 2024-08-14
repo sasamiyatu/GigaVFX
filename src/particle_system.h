@@ -2,6 +2,7 @@
 #include "defines.h"
 #include <vector>
 #include <unordered_map>
+#include "buffer.h"
 
 #define MAX_PARTICLES 512
 
@@ -12,6 +13,8 @@ struct Context;
 struct GraphicsPipelineAsset;
 struct Texture;
 struct TextureCatalog;
+
+struct ParticleRenderSettings;
 
 #define PARTICLE_SYSTEM_DIRECTORY "data/particle_systems"
 
@@ -34,6 +37,7 @@ struct ParticleRenderer
 	GraphicsPipelineAsset* additive_blend_pipeline;
 	GraphicsPipelineAsset* alpha_blend_pipeline;
 	VkBuffer shader_globals;
+	Buffer renderer_settings;
 	// Descriptor pool for particle textures
 	VkSampler texture_sampler;
 
@@ -43,6 +47,7 @@ struct ParticleRenderer
 	void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format);
 	void shutdown();
 	void render(VkCommandBuffer command_buffer, const ParticleSystem& particle_system);
+	void set_render_settings(const ParticleRenderSettings& render_settings);
 };
 
 struct Particle
@@ -89,6 +94,10 @@ struct ParticleSystem
 
 	ParticleRenderer* renderer = nullptr;
 	const Texture* texture = nullptr;
+	bool emission_enabled = false;
+	const Texture* emission_map = nullptr;
+	glm::vec4 albedo_factor = glm::vec4(1.0, 1.0, 1.0, 1.0);
+	glm::vec4 emission_factor = glm::vec4(1.0, 1.0, 1.0, 1.0);
 	bool use_flipbook_animation = false;
 	glm::ivec2 flipbook_size = glm::ivec2(1, 1);
 	int flipbook_index = 0;
