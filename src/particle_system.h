@@ -25,6 +25,9 @@ struct ParticleSystemManager
 	const char* directory = nullptr;
 	ParticleRenderer* renderer;
 
+	float playback_speed = 1.0f;
+	bool paused = false;
+
 	void init(ParticleRenderer* renderer);
 	void draw_ui();
 	void update(float dt);
@@ -58,6 +61,7 @@ struct Particle
 	glm::vec4 color;
 	float lifetime;
 	float size;
+	float rotation;
 	int flipbook_index;
 };
 
@@ -71,7 +75,9 @@ struct ParticleSystem
 	char name[64] = { 0 };
 
 	glm::vec3 position = glm::vec3(0.0f);
-
+	
+	float duration = 1.0f;
+	bool looping = true;
 	float lifetime = -1.0f; // Negative = infinite lifetime
 	float emission_rate = 10.0f;
 	float time = 0.0f;
@@ -80,7 +86,8 @@ struct ParticleSystem
 	glm::vec4 particle_color0 = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 	glm::vec4 particle_color1 = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 	float initial_speed = 5.0f;
-	glm::vec3 acceleration = glm::vec3(0.0f, -9.81f, 0.0f);
+	float gravity_modifier = 0.0f;
+	glm::vec2 start_rotation = glm::vec2(0.0f);
 	float particle_lifetime = 5.0f;
 	float particle_size = 0.01f;
 	bool random_color = false;
@@ -99,9 +106,9 @@ struct ParticleSystem
 	glm::vec4 albedo_factor = glm::vec4(1.0, 1.0, 1.0, 1.0);
 	glm::vec4 emission_factor = glm::vec4(1.0, 1.0, 1.0, 1.0);
 	bool use_flipbook_animation = false;
+	bool flipbook_frame_blending = false;
 	glm::ivec2 flipbook_size = glm::ivec2(1, 1);
 	int flipbook_index = 0;
-
 	float time_until_spawn = 0.0f;
 
 	ParticleSystem(ParticleRenderer* renderer);
@@ -109,4 +116,5 @@ struct ParticleSystem
 	void draw_ui();
 	bool save();
 	bool load(const char* filepath);
+	void reset();
 };

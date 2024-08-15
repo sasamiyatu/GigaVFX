@@ -10,6 +10,8 @@
 #include <fstream>
 #include <sstream>
 
+constexpr glm::vec3 GRAVITY = glm::vec3(0.0f, -9.81f, 0.0f);
+
 ParticleSystem::ParticleSystem(ParticleRenderer* renderer)
 	: renderer(renderer)
 {
@@ -18,6 +20,11 @@ ParticleSystem::ParticleSystem(ParticleRenderer* renderer)
 
 void ParticleSystem::update(float dt)
 {
+	if (lifetime <= 0.0f) return;
+	
+	lifetime -= dt;
+	while (lifetime <= 0.0f && looping) lifetime += duration;
+
 	for (uint32_t i = 0; i < particle_count;)
 	{
 		Particle& p = particles[i];
@@ -35,16 +42,17 @@ void ParticleSystem::update(float dt)
 	}
 
 	time_until_spawn -= dt;
-	if (time_until_spawn <= 0.0f && particle_count < MAX_PARTICLES)
+	if (time_until_spawn < 0.0f && particle_count < MAX_PARTICLES)
 	{
 		Particle& p = particles[particle_count++];
 		p.lifetime = particle_lifetime;
 		p.position = position;
 		p.velocity = random_vector_in_oriented_cone(cosf(cone_angle), glm::vec3(0.0, 1.0f, 0.0f)) * initial_speed;
 		p.color = random_color ? random_vector<glm::vec4>() : glm::lerp(particle_color0, particle_color1, uniform_random());
-		p.acceleration = acceleration;
+		p.acceleration = GRAVITY * gravity_modifier;
 		p.size = particle_size;
 		p.flipbook_index = flipbook_index; //random_int_in_range(0, flipbook_size.x * flipbook_size.y);
+		p.rotation = glm::radians(random_in_range(start_rotation.x, start_rotation.y));
 		time_until_spawn += 1.0f / emission_rate;	
 	}
 }
@@ -66,13 +74,16 @@ void ParticleSystem::draw_ui()
 	ImGui::Text("Particle system settings");               // Display some text (you can use a format strings too)
 
 	ImGui::InputText("name", name, std::size(name));
-
+	
+	ImGui::DragFloat("duration", &duration);
+	ImGui::Checkbox("looping", &looping);
 	ImGui::DragFloat3("emitter position", glm::value_ptr(position), 0.1f, -1000.0f, 1000.0f);
 	ImGui::DragFloat("particle lifetime", &particle_lifetime, 0.1f, 0.0f, 100.0f);
 	ImGui::DragFloat("particle size", &particle_size, 0.01f, 0.0f, 100.0f);
 	if (ImGui::DragFloat("emission rate", &emission_rate, 0.1f, 0.0f, 1000.0f)) time_until_spawn = 1.0f / emission_rate;
 	ImGui::DragFloat("initial speed", &initial_speed, 0.1f, 0.0f, 1000.0f);
-	ImGui::DragFloat3("acceleration", glm::value_ptr(acceleration), 0.1f, -100.0f, 100.0f);
+	ImGui::DragFloat("gravity_modifier", &gravity_modifier, 0.1f, 0.0f, 100.0f);
+	ImGui::DragFloat2("start rotation", glm::value_ptr(start_rotation), 0.0f, 360.0f);
 
 	ImGui::SliderAngle("cone angle", &cone_angle, 0.0f, 180.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
 	ImGui::ColorEdit4("color 0", (float*)&particle_color0);
@@ -115,6 +126,7 @@ void ParticleSystem::draw_ui()
 			ImGui::Checkbox("use flipbook animation", &use_flipbook_animation);
 			ImGui::DragInt2("flipbook size", glm::value_ptr(flipbook_size), 1.0f, 1, 16);
 			ImGui::DragInt("flipbook index", &flipbook_index, 1.0f, 0, flipbook_size.x * flipbook_size.y - 1);
+			ImGui::Checkbox("flipbook frame blending", &flipbook_frame_blending);
 		}
 
 		static const char* items[]{ "Additive blend", "Alpha blend" };
@@ -154,7 +166,7 @@ std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
 	os << "particle_color0: " << ps.particle_color0 << "\n";
 	os << "particle_color1: " << ps.particle_color1 << "\n";
 	os << "initial_speed: " << ps.initial_speed << "\n";
-	os << "acceleration: " << ps.acceleration << "\n";
+	os << "gravity_modifier: " << ps.gravity_modifier << "\n";
 	os << "particle_lifetime: " << ps.particle_lifetime << "\n";
 	os << "particle_size: " << ps.particle_size << "\n";
 	os << "random_color: " << ps.random_color << "\n";
@@ -166,7 +178,11 @@ std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
 	os << "albedo_factor: " << ps.albedo_factor << "\n";
 	os << "emission_factor: " << ps.emission_factor << "\n";
 	os << "blend_mode: " << ps.blend_mode << "\n";
-
+	os << "flipbook_frame_blending: " << ps.flipbook_frame_blending << "\n";
+	os << "duration: " << ps.duration << "\n";
+	os << "looping: " << ps.looping << "\n";
+	os << "start_rotation: " << ps.start_rotation << "\n";
+ 
 	if (ps.texture) os << "texture: " << ps.texture->name << "\n";
 	if (ps.emission_map) os << "emission_map: " << ps.emission_map->name << "\n";
 
@@ -194,7 +210,44 @@ bool ParticleSystem::save()
 	return true;
 }
 
+static void read_floats(const std::vector<std::string>& tokens, const char* parameter_name, float* out_floats, size_t count)
+{
+	if (tokens.size() != count)
+	{
+		LOG_ERROR("Error parsing parameter %s", parameter_name);
+	}
 
+	for (size_t i = 0; i < count; ++i) out_floats[i] = (float)std::atof(tokens[i].c_str());
+}
+
+#define READ_FLOATS(var, name, count)                           \
+if (parameter == name)                                          \
+{																\
+	float* addr = (float*)&var;                                 \
+	for (size_t i = 0; i < count; ++i)                          \
+	{                                                           \
+		addr[i] = std::atof(split[i].c_str());                  \
+	}                                                           \
+	continue;													\
+}
+
+#define READ_INTS(var, name, count)                             \
+if (parameter == name)                                          \
+{																\
+	int* addr = (int*)&var;										\
+	for (size_t i = 0; i < count; ++i)                          \
+	{                                                           \
+		addr[i] = std::atoi(split[i].c_str());                  \
+	}                                                           \
+	continue;													\
+}
+
+#define READ_BOOL(var, name)									\
+if (parameter == name)                                          \
+{																\
+	var = (bool)std::atoi(split[0].c_str());                    \
+	continue;													\
+}
 
 bool ParticleSystem::load(const char* filepath)
 {
@@ -220,94 +273,37 @@ bool ParticleSystem::load(const char* filepath)
 			split.push_back(token);
 		}
 
-		if (parameter == "position")
-		{
-			if (split.size() != 3)
-			{
-				LOG_ERROR("Error parsing file %s!", filepath);
-				return false;
-			}
-			for (int i = 0; i < 3; ++i) position[i] = (float)std::atof(split[i].c_str());
-		}
-		else if (parameter == "lifetime")
-		{
-			if (split.size() != 1) goto error;
-			lifetime = (float)std::atof(split[0].c_str());
-		}
-		else if (parameter == "emission_rate")
-		{
-			if (split.size() != 1) goto error;
-			emission_rate = (float)std::atof(split[0].c_str());
-		}
-		else if (parameter == "cone_angle")
-		{
-			if (split.size() != 1) goto error;
-			cone_angle = (float)std::atof(split[0].c_str());
-		}
-		else if (parameter == "particle_color0")
-		{
-			if (split.size() != 4) goto error;
-			for (int i = 0; i < 4; ++i) particle_color0[i] = (float)std::atof(split[i].c_str());
-		}
-		else if (parameter == "particle_color1")
-		{
-			if (split.size() != 4) goto error;
-			for (int i = 0; i < 4; ++i) particle_color1[i] = (float)std::atof(split[i].c_str());
-		}
-		else if (parameter == "initial_speed")
-		{
-			if (split.size() != 1) goto error;
-			initial_speed = (float)std::atof(split[0].c_str());
-		}
-		else if (parameter == "acceleration")
-		{
-			if (split.size() != 3) goto error;
-			for (int i = 0; i < 3; ++i) acceleration[i] = (float)std::atof(split[i].c_str());
-		}
-		else if (parameter == "particle_lifetime")
-		{
-			if (split.size() != 1) goto error;
-			particle_lifetime = (float)std::atof(split[0].c_str());
-		}
-		else if (parameter == "particle_size")
-		{
-			if (split.size() != 1) goto error;
-			particle_size = (float)std::atof(split[0].c_str());
-		}
-		else if (parameter == "random_color")
-		{
-			if (split.size() != 1) goto error;
-			random_color = (bool)std::atoi(split[0].c_str());
-		}
-		else if (parameter == "texture")
+		READ_FLOATS(position, "position", 3);
+		READ_FLOATS(lifetime, "lifetime", 1);
+		READ_FLOATS(emission_rate, "emission_rate", 1);
+		READ_FLOATS(cone_angle, "cone_angle", 1);
+		READ_FLOATS(particle_color0, "particle_color0", 4);
+		READ_FLOATS(particle_color1, "particle_color1", 4);
+		READ_FLOATS(initial_speed, "initial_speed", 1);
+		READ_FLOATS(gravity_modifier, "gravity_modifier", 1);
+		READ_FLOATS(particle_lifetime, "particle_lifetime", 1);
+		READ_FLOATS(particle_size, "particle_size", 1);
+		READ_FLOATS(albedo_factor, "albedo_factor", 4);
+		READ_FLOATS(emission_factor, "emission_factor", 4);
+		READ_FLOATS(duration, "duration", 1);
+		READ_FLOATS(start_rotation, "start_rotation", 2);
+		READ_INTS(flipbook_size, "flipbook_size", 2);
+		READ_INTS(flipbook_index, "flipbook_index", 1);
+		READ_INTS(blend_mode, "blend_mode", 1);
+		READ_BOOL(random_color, "random_color");
+		READ_BOOL(emission_enabled, "emission");
+		READ_BOOL(flipbook_frame_blending, "flipbook_frame_blending");
+		READ_BOOL(use_flipbook_animation, "use_flipbook_animation");
+		READ_BOOL(looping, "looping");
+		if (parameter == "texture")
 		{
 			texture = renderer->texture_catalog->get_texture(split[0].c_str());
 			if (!texture) LOG_ERROR("Failed to find texture %s!", split[0].c_str());
-		}
-		else if (parameter == "use_flipbook_animation")
-		{
-			if (split.size() != 1) goto error;
-			use_flipbook_animation = (bool)std::atoi(split[0].c_str());
-		}
-		else if (parameter == "flipbook_size")
-		{
-			if (split.size() != 2) goto error;
-			for (int i = 0; i < 2; ++i) flipbook_size[i] = std::atoi(split[i].c_str());
-		}
-		else if (parameter == "flipbook_index")
-		{
-			if (split.size() != 1) goto error;
-			flipbook_index = std::atoi(split[0].c_str());
 		}
 		else if (parameter == "name")
 		{
 			if (split.size() != 1) goto error;
 			strncpy(name, split[0].c_str(), std::size(name) - 1);
-		}
-		else if (parameter == "emission")
-		{
-			if (split.size() != 1) goto error;
-			emission_enabled = (bool)std::atoi(split[0].c_str());
 		}
 		else if (parameter == "emission_map")
 		{
@@ -315,28 +311,22 @@ bool ParticleSystem::load(const char* filepath)
 			emission_map = renderer->texture_catalog->get_texture(split[0].c_str());
 			if (!emission_map) LOG_ERROR("Failed to find texture %s!", split[0].c_str());
 		}
-		else if (parameter == "blend_mode")
-		{
-			if (split.size() != 1) goto error;
-			blend_mode = (BlendMode)std::atoi(split[0].c_str());
-		}
-		else if (parameter == "albedo_factor")
-		{
-			if (split.size() != 4) goto error;
-			for (int i = 0; i < 4; ++i) albedo_factor[i] = (float)std::atof(split[i].c_str());
-		}
-		else if (parameter == "emission_factor")
-		{
-			if (split.size() != 4) goto error;
-			for (int i = 0; i < 4; ++i) emission_factor[i] = (float)std::atof(split[i].c_str());
-		}
 	}
+
+	reset();
 
 	return true;
 
 error:
 	LOG_ERROR("Error parsing file %s on line %d!", filepath, line_count);
 	return false;
+}
+
+void ParticleSystem::reset()
+{
+	particle_count = 0;
+	time_until_spawn = 0.0f;
+	lifetime = duration;
 }
 
 void ParticleRenderer::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format)
@@ -440,11 +430,24 @@ void ParticleRenderer::render(VkCommandBuffer command_buffer, const ParticleSyst
 		pc.flipbook_size = particle_system.flipbook_size;
 		pc.size = p.size;
 		pc.normalized_lifetime = glm::clamp(p.lifetime * inv_particle_lifetime, 0.0f, 1.0f);
-		pc.flipbook_index = p.flipbook_index;
+		float age = 1.0f - pc.normalized_lifetime;
+		pc.flipbook_index0 = pc.flipbook_index1 = p.flipbook_index;
+		pc.rotation = p.rotation;
 		if (particle_system.use_flipbook_animation)
 		{
-			int flipbook_offset = std::min((int)((1.0f - pc.normalized_lifetime) * flipbook_range), flipbook_range - 1);
-			pc.flipbook_index = (pc.flipbook_index + flipbook_offset) % flipbook_range;
+			float lerp = glm::fract(age * (float)flipbook_range);
+			int flipbook_offset = std::min((int)(age * flipbook_range), flipbook_range - 1);
+			pc.flipbook_index0 = (p.flipbook_index + flipbook_offset) % flipbook_range;
+			if (particle_system.flipbook_frame_blending)
+			{
+				pc.flipbook_index1 = std::min((int)pc.flipbook_index0 + 1, flipbook_range - 1);
+				pc.flipbook_blend = lerp;
+			}
+			else
+			{
+				pc.flipbook_index1 = pc.flipbook_index0;
+				pc.flipbook_blend = 0.0f;
+			}
 		}
 
 		vkCmdPushConstants(command_buffer, render_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
@@ -553,12 +556,55 @@ void ParticleSystemManager::draw_ui()
 	}
 
 	ImGui::End();
+
+	ImGui::Begin("Particle simulation");
+
+	if (paused)
+	{
+		if (ImGui::Button("Play"))
+		{
+			paused = false;
+		}
+	}
+	else
+	{
+		if (ImGui::Button("Pause"))
+		{
+			paused = true;
+		}
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Restart"))
+	{
+		if (active_system)
+			active_system->reset();
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Stop"))
+	{
+		if (active_system)
+			active_system->reset();
+		paused = true;
+	}
+
+	ImGui::DragFloat("Playback Speed", &playback_speed, 0.1f, 0.0f, 10.0f);
+	if (active_system)
+	{
+		ImGui::Text("Playback time: %f", active_system->duration - active_system->lifetime);
+	}
+
+	ImGui::End();
 }
 
 void ParticleSystemManager::update(float dt)
 {
+	float t = !paused ? dt * playback_speed : 0.0f;
 	if (active_system)
-		active_system->update(dt);
+		active_system->update(t);
 }
 
 void ParticleSystemManager::render(VkCommandBuffer cmd)

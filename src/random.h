@@ -12,7 +12,7 @@ inline float uniform_random()
 
 inline float random_in_range(float low, float high)
 {
-	assert(high >= low);
+	if (high < low) std::swap(low, high);
 	float range = high - low;
 	return uniform_random() * range + low;
 }

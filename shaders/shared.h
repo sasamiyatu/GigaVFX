@@ -55,7 +55,10 @@ struct PushCostantsParticles
     uint2 flipbook_size;
     float size;
     float normalized_lifetime;
-    uint flipbook_index;
+    uint flipbook_index0;
+    uint flipbook_index1;
+    float flipbook_blend;
+    float rotation;
 };
 
 struct PushConstantsTonemap
