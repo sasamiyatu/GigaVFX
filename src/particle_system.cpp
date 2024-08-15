@@ -50,7 +50,7 @@ void ParticleSystem::update(float dt)
 		p.velocity = random_vector_in_oriented_cone(cosf(cone_angle), glm::vec3(0.0, 1.0f, 0.0f)) * initial_speed;
 		p.color = random_color ? random_vector<glm::vec4>() : glm::lerp(particle_color0, particle_color1, uniform_random());
 		p.acceleration = GRAVITY * gravity_modifier;
-		p.size = particle_size;
+		p.size = random_in_range(start_size.x, start_size.y);
 		p.flipbook_index = flipbook_index; //random_int_in_range(0, flipbook_size.x * flipbook_size.y);
 		p.rotation = glm::radians(random_in_range(start_rotation.x, start_rotation.y));
 		time_until_spawn += 1.0f / emission_rate;	
@@ -79,7 +79,7 @@ void ParticleSystem::draw_ui()
 	ImGui::Checkbox("looping", &looping);
 	ImGui::DragFloat3("emitter position", glm::value_ptr(position), 0.1f, -1000.0f, 1000.0f);
 	ImGui::DragFloat("particle lifetime", &particle_lifetime, 0.1f, 0.0f, 100.0f);
-	ImGui::DragFloat("particle size", &particle_size, 0.01f, 0.0f, 100.0f);
+	ImGui::DragFloat2("start size", glm::value_ptr(start_size), 0.01f, 0.0f, 100.0f);
 	if (ImGui::DragFloat("emission rate", &emission_rate, 0.1f, 0.0f, 1000.0f)) time_until_spawn = 1.0f / emission_rate;
 	ImGui::DragFloat("initial speed", &initial_speed, 0.1f, 0.0f, 1000.0f);
 	ImGui::DragFloat("gravity_modifier", &gravity_modifier, 0.1f, 0.0f, 100.0f);
@@ -152,6 +152,11 @@ std::ostream& operator<<(std::ostream& os, const glm::vec3& v)
 	return os << v.x << " " << v.y << " " << v.z;
 }
 
+std::ostream& operator<<(std::ostream& os, const glm::vec2& v)
+{
+	return os << v.x << " " << v.y;
+}
+
 std::ostream& operator<<(std::ostream& os, const glm::ivec2& v)
 {
 	return os << v.x << " " << v.y;
@@ -160,7 +165,6 @@ std::ostream& operator<<(std::ostream& os, const glm::ivec2& v)
 std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
 {
 	os << "position: " << ps.position << "\n";
-	os << "lifetime: " << ps.lifetime << "\n";
 	os << "emission_rate: " << ps.emission_rate << "\n";
 	os << "cone_angle: " << ps.cone_angle << "\n";
 	os << "particle_color0: " << ps.particle_color0 << "\n";
@@ -168,7 +172,7 @@ std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
 	os << "initial_speed: " << ps.initial_speed << "\n";
 	os << "gravity_modifier: " << ps.gravity_modifier << "\n";
 	os << "particle_lifetime: " << ps.particle_lifetime << "\n";
-	os << "particle_size: " << ps.particle_size << "\n";
+	os << "start_size: " << ps.start_size << "\n";
 	os << "random_color: " << ps.random_color << "\n";
 	os << "use_flipbook_animation: " << ps.use_flipbook_animation << "\n";
 	os << "flipbook_size: " << ps.flipbook_size << "\n";
@@ -274,7 +278,6 @@ bool ParticleSystem::load(const char* filepath)
 		}
 
 		READ_FLOATS(position, "position", 3);
-		READ_FLOATS(lifetime, "lifetime", 1);
 		READ_FLOATS(emission_rate, "emission_rate", 1);
 		READ_FLOATS(cone_angle, "cone_angle", 1);
 		READ_FLOATS(particle_color0, "particle_color0", 4);
@@ -282,7 +285,7 @@ bool ParticleSystem::load(const char* filepath)
 		READ_FLOATS(initial_speed, "initial_speed", 1);
 		READ_FLOATS(gravity_modifier, "gravity_modifier", 1);
 		READ_FLOATS(particle_lifetime, "particle_lifetime", 1);
-		READ_FLOATS(particle_size, "particle_size", 1);
+		READ_FLOATS(start_size, "start_size", 2);
 		READ_FLOATS(albedo_factor, "albedo_factor", 4);
 		READ_FLOATS(emission_factor, "emission_factor", 4);
 		READ_FLOATS(duration, "duration", 1);

@@ -89,7 +89,7 @@ struct ParticleSystem
 	float gravity_modifier = 0.0f;
 	glm::vec2 start_rotation = glm::vec2(0.0f);
 	float particle_lifetime = 5.0f;
-	float particle_size = 0.01f;
+	glm::vec2 start_size = glm::vec2(0.01f);
 	bool random_color = false;
 
 	enum BlendMode
