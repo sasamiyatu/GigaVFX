@@ -46,8 +46,23 @@ void ParticleSystem::update(float dt)
 	{
 		Particle& p = particles[particle_count++];
 		p.lifetime = particle_lifetime;
-		p.position = position;
-		p.velocity = random_vector_in_oriented_cone(cosf(cone_angle), glm::vec3(0.0, 1.0f, 0.0f)) * initial_speed;
+		switch (shape_settings.shape)
+		{
+		case EmissionShape::NONE:
+			p.velocity = glm::vec3(0.0f, 1.0f, 0.0f) * initial_speed;
+			p.position = position;
+			break;
+		case EmissionShape::CONE:
+		{
+			p.velocity = random_vector_in_oriented_cone(cosf(shape_settings.angle), glm::vec3(0.0, 1.0f, 0.0f)) * initial_speed;
+			float arc = random_in_range(0.0f, shape_settings.arc);
+			float r = random_in_range(0.0f, shape_settings.radius);
+			p.position = position + glm::vec3(cosf(arc), 0.0f, sinf(arc)) * r;
+		} break;
+		default:
+			assert(false);
+			break;
+		}
 		p.color = random_color ? random_vector<glm::vec4>() : glm::lerp(particle_color0, particle_color1, uniform_random());
 		p.acceleration = GRAVITY * gravity_modifier;
 		p.size = random_in_range(start_size.x, start_size.y);
@@ -85,7 +100,33 @@ void ParticleSystem::draw_ui()
 	ImGui::DragFloat("gravity_modifier", &gravity_modifier, 0.1f, 0.0f, 100.0f);
 	ImGui::DragFloat2("start rotation", glm::value_ptr(start_rotation), 0.0f, 360.0f);
 
-	ImGui::SliderAngle("cone angle", &cone_angle, 0.0f, 180.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
+	if (ImGui::CollapsingHeader("Shape"))
+	{
+		const char* names[(int)EmissionShape::MAX] = { "None", "Cone" };
+		if (ImGui::BeginCombo("Select shape", names[(int)shape_settings.shape]))
+		{
+			for (int i = 0; i < std::size(names); ++i)
+			{
+				if (ImGui::Selectable(names[i], (int)shape_settings.shape == i))
+				{
+					shape_settings.shape = (EmissionShape)i;
+				}
+			}
+
+			ImGui::EndCombo();
+		}
+
+		switch (shape_settings.shape)
+		{
+		case EmissionShape::CONE:
+			ImGui::SliderAngle("Angle", &shape_settings.angle, 0.0f, 90.0f);
+			ImGui::DragFloat("Radius", &shape_settings.radius, 0.1f, 0.0f, 3000.0f);
+			ImGui::SliderAngle("Arc", &shape_settings.arc, 0.0f, 360.0f);
+			break;
+		default:
+			break;
+		}
+	}
 	ImGui::ColorEdit4("color 0", (float*)&particle_color0);
 	ImGui::ColorEdit4("color 1", (float*)&particle_color1);
 	ImGui::Checkbox("randomize color", &random_color);
@@ -166,7 +207,7 @@ std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
 {
 	os << "position: " << ps.position << "\n";
 	os << "emission_rate: " << ps.emission_rate << "\n";
-	os << "cone_angle: " << ps.cone_angle << "\n";
+	os << "cone_angle: " << ps.shape_settings.angle << "\n";
 	os << "particle_color0: " << ps.particle_color0 << "\n";
 	os << "particle_color1: " << ps.particle_color1 << "\n";
 	os << "initial_speed: " << ps.initial_speed << "\n";
@@ -186,6 +227,8 @@ std::ostream& operator<<(std::ostream& os, const ParticleSystem& ps)
 	os << "duration: " << ps.duration << "\n";
 	os << "looping: " << ps.looping << "\n";
 	os << "start_rotation: " << ps.start_rotation << "\n";
+	os << "shape: " << (int)ps.shape_settings.shape << "\n";
+	os << "arc: " << ps.shape_settings.arc << "\n";
  
 	if (ps.texture) os << "texture: " << ps.texture->name << "\n";
 	if (ps.emission_map) os << "emission_map: " << ps.emission_map->name << "\n";
@@ -279,7 +322,7 @@ bool ParticleSystem::load(const char* filepath)
 
 		READ_FLOATS(position, "position", 3);
 		READ_FLOATS(emission_rate, "emission_rate", 1);
-		READ_FLOATS(cone_angle, "cone_angle", 1);
+		READ_FLOATS(shape_settings.angle, "cone_angle", 1);
 		READ_FLOATS(particle_color0, "particle_color0", 4);
 		READ_FLOATS(particle_color1, "particle_color1", 4);
 		READ_FLOATS(initial_speed, "initial_speed", 1);
@@ -290,9 +333,11 @@ bool ParticleSystem::load(const char* filepath)
 		READ_FLOATS(emission_factor, "emission_factor", 4);
 		READ_FLOATS(duration, "duration", 1);
 		READ_FLOATS(start_rotation, "start_rotation", 2);
+		READ_FLOATS(shape_settings.arc, "arc", 1);
 		READ_INTS(flipbook_size, "flipbook_size", 2);
 		READ_INTS(flipbook_index, "flipbook_index", 1);
 		READ_INTS(blend_mode, "blend_mode", 1);
+		READ_INTS(shape_settings.shape, "shape", 1);
 		READ_BOOL(random_color, "random_color");
 		READ_BOOL(emission_enabled, "emission");
 		READ_BOOL(flipbook_frame_blending, "flipbook_frame_blending");

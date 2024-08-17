@@ -67,6 +67,22 @@ struct Particle
 
 #define MAX_NAME_LENGTH 64
 
+
+enum class EmissionShape
+{
+	NONE = 0,
+	CONE,
+	MAX,
+};
+
+struct ShapeSettings
+{
+	EmissionShape shape = EmissionShape::NONE;
+	float angle = 0.0f;
+	float radius = 0.0f;
+	float arc = glm::radians(360.0f);
+};
+
 struct ParticleSystem
 {
 	Particle particles[MAX_PARTICLES];
@@ -82,7 +98,7 @@ struct ParticleSystem
 	float emission_rate = 10.0f;
 	float time = 0.0f;
 
-	float cone_angle = 0.0f;
+	ShapeSettings shape_settings;
 	glm::vec4 particle_color0 = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 	glm::vec4 particle_color1 = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 	float initial_speed = 5.0f;
@@ -91,6 +107,7 @@ struct ParticleSystem
 	float particle_lifetime = 5.0f;
 	glm::vec2 start_size = glm::vec2(0.01f);
 	bool random_color = false;
+
 
 	enum BlendMode
 	{
