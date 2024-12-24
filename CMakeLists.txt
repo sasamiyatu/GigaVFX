@@ -66,6 +66,8 @@ add_executable(gigasticle
     src/gltf.cpp
     src/gmath.h
     src/gmath.cpp
+    src/gpu_particles.h
+    src/gpu_particles.cpp
     src/graphics_context.h
     src/graphics_context.cpp
     src/hot_reload.h

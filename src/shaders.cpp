@@ -53,7 +53,6 @@ static LPWSTR get_shader_type_str(VkShaderStageFlagBits shader_stage)
 	}
 }
 
-
 namespace Shaders
 {
 
@@ -67,7 +66,7 @@ void init()
 	initialized = true;
 }
 
-uint32_t* Shaders::load_shader(const char* filepath, VkShaderStageFlagBits shader_stage, uint32_t* size)
+uint32_t* Shaders::load_shader(const char* filepath, const char* entry_point, VkShaderStageFlagBits shader_stage, uint32_t* size)
 {
 	assert(initialized);
 
@@ -83,10 +82,13 @@ uint32_t* Shaders::load_shader(const char* filepath, VkShaderStageFlagBits shade
 	src.Size = file_size;
 	src.Encoding = DXC_CP_ACP;
 
+	std::wstring ep_str;
+	if (entry_point) ep_str = std::wstring(entry_point, entry_point + strlen(entry_point));
 	LPCWSTR args[] = {
-		L"-E", get_entry_point(shader_stage),
+		L"-E", !ep_str.empty() ? ep_str.data() : get_entry_point(shader_stage),
 		L"-T", get_shader_type_str(shader_stage),
 		L"-Zs", L"-spirv",
+		L"-fvk-use-scalar-layout",
 		L"-HV 2021",
 		L"-O0"
 	};

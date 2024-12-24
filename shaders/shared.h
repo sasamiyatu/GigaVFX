@@ -25,7 +25,7 @@ FUNC_QUALIFIER float linearize_depth(float depth, float4 projection_info)
     return depth * projection_info.x + projection_info.y;
 }
 
-struct alignas(16) Material
+struct Material
 {
     float4 basecolor_factor;
     float roughness_factor;
@@ -80,10 +80,30 @@ struct ShaderGlobals
     float4 camera_pos;
     float4 sun_direction;
     float4 sun_color_and_intensity;
+    float2 resolution;
 };
 
 struct ParticleRenderSettings
 {
     float4 albedo_multiplier;
     float4 emission_multiplier;
+};
+
+struct GPUParticlePushConstants
+{
+    float delta_time;
+    uint particles_to_spawn;
+};
+
+struct GPUParticleSystemGlobals
+{
+    float4x4 transform;
+    uint particle_capacity;
+};
+
+struct GPUParticle
+{
+    float3 position;
+    float3 velocity;
+    float lifetime; // alive if > 0
 };

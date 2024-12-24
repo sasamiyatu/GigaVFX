@@ -28,13 +28,14 @@
 #include "particle_system.h"
 #include "random.h"
 #include "texture_catalog.h"    
+#include "gpu_particles.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
 #include "imgui/imgui_impl_vulkan.h"
 
-constexpr uint32_t WINDOW_WIDTH = 1920;
-constexpr uint32_t WINDOW_HEIGHT = 1080;
+constexpr uint32_t WINDOW_WIDTH = 1280;
+constexpr uint32_t WINDOW_HEIGHT = 720;
 
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
 
@@ -316,6 +317,10 @@ int main(int argc, char** argv)
     ParticleSystemManager particle_system_manager;
     particle_system_manager.init(&particle_renderer);
 
+    constexpr uint32_t particle_capacity = 256;
+    GPUParticleSystem gpu_particle_system;
+    gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity);
+
     std::vector<MeshInstance> mesh_draws;
 
     bool running = true;
@@ -472,6 +477,7 @@ int main(int argc, char** argv)
             glm::vec3 sundir = glm::normalize(glm::vec3(1.0f));
             globals.sun_direction = glm::vec4(sundir, 1.0f);
             globals.sun_color_and_intensity = glm::vec4(1.0f);
+            globals.resolution = glm::vec2((float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
 
             glm::vec4 origin_shift[4];
             float max_distance = 100.0f;
@@ -649,6 +655,9 @@ int main(int argc, char** argv)
             vkCmdEndRendering(command_buffer);
         }
 
+        // Where is the correct spot for this?
+        gpu_particle_system.simulate(command_buffer, (float)delta_time);
+
         { // Forward pass
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             color_info.imageView = hdr_render_target.view;
@@ -718,7 +727,8 @@ int main(int argc, char** argv)
             }
         }
 
-        particle_system_manager.render(command_buffer);
+        //particle_system_manager.render(command_buffer);
+        gpu_particle_system.render(command_buffer);
 
         vkCmdEndRendering(command_buffer);
 
@@ -803,6 +813,7 @@ int main(int argc, char** argv)
         vkDestroyImageView(ctx.device, t.view, nullptr);
         vmaDestroyImage(ctx.allocator, t.image, t.allocation);
     }
+    gpu_particle_system.destroy();
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);

@@ -128,7 +128,7 @@ struct ComputePipelineBuilder
     bool set_layout_passed_from_outside[max_descriptor_set_layouts] = { false };
     uint32_t descriptor_set_layout_count = 0;
 
-    ComputePipelineBuilder& set_shader_filepath(const char* filepath);
+    ComputePipelineBuilder& set_shader_filepath(const char* filepath, const char* entry_point = "cs_main");
     ComputePipelineBuilder(VkDevice device, bool enable_shader_hot_reload);
 
     bool build(Pipeline* pipeline);

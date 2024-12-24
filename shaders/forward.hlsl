@@ -119,8 +119,7 @@ PSOutput fs_main(VSOutput input)
     //float4 basecolor = basecolor_texture.Sample(bilinear_sampler, input.texcoord0);
     Material material = materials.Load(push_constants.material_index);
     MaterialContext material_context = load_material_context(input, material);
-    if (material_context.basecolor.a < material.alpha_cutoff)
-        discard;
+    //if (material_context.basecolor.a < material.alpha_cutoff) discard;
 
     float3 V = normalize(globals.camera_pos.xyz - input.world_position);
     float3 N = material_context.shading_normal;

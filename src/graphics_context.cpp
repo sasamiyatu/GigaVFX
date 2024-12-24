@@ -21,10 +21,18 @@ void Context::init(int window_width, int window_height)
     instance_builder.require_api_version(1, 3, 0);
     instance_builder.set_app_name("Gigasticle");
     instance_builder.request_validation_layers();
+    instance_builder.enable_validation_layers();
+    instance_builder.add_validation_feature_enable(VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT);
     instance_builder.enable_extensions({
         VK_KHR_SURFACE_EXTENSION_NAME,
         VK_KHR_WIN32_SURFACE_EXTENSION_NAME
         });
+    instance_builder.set_debug_messenger_severity(
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
+        | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+        | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
+        //| VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+    );
     instance_builder.set_debug_callback(
         [](VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
             VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -34,7 +42,7 @@ void Context::init(int window_width, int window_height)
             auto severity = vkb::to_string_message_severity(messageSeverity);
             auto type = vkb::to_string_message_type(messageType);
             LOG_ERROR("[%s: %s] %s\n", severity, type, pCallbackData->pMessage);
-            if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+            if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
             {
                 assert(false);
             }
@@ -76,6 +84,7 @@ void Context::init(int window_width, int window_height)
     vulkan_12_features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
     vulkan_12_features.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
     vulkan_12_features.runtimeDescriptorArray = VK_TRUE;
+    vulkan_12_features.scalarBlockLayout = VK_TRUE;
 
     VkPhysicalDeviceVulkan11Features vulkan_11_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
     vulkan_11_features.multiview = VK_TRUE;
@@ -645,6 +654,7 @@ bool Context::create_textures(Texture* textures, uint32_t count)
     return true;
 }
 
+// TODO: Allow creating device local buffers with upload via staging buffer
 Buffer Context::create_buffer(const BufferDesc& desc)
 {
     VkBufferCreateInfo buffer_info{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -672,6 +682,13 @@ Buffer Context::create_buffer(const BufferDesc& desc)
     result.buffer = buffer;
     result.allocation = allocation;
     return result;
+}
+
+void Context::destroy_buffer(Buffer& buffer)
+{
+    vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
+    buffer.allocation = VK_NULL_HANDLE;
+    buffer.buffer = VK_NULL_HANDLE;
 }
 
 VkDeviceAddress Context::buffer_device_address(const Buffer& buffer)

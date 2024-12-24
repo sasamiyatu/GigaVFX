@@ -65,6 +65,7 @@ struct Context
     bool create_textures(Texture* textures, uint32_t count);
 
     Buffer create_buffer(const BufferDesc& desc);
+    void destroy_buffer(Buffer& buffer);
 
     VkDeviceAddress buffer_device_address(const Buffer& buffer);
 };
