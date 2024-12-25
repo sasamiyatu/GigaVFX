@@ -34,15 +34,15 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
 
 
     GPUParticle p = particles[thread_id.x];
+    uint spawned_count = particles_spawned[0];
     if (p.lifetime > 0.0)
     {
         if (thread_id.x == 0) printf("Simulate\n");
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
-    else if (particles_spawned[0] < push_constants.particles_to_spawn)
+    else if (spawned_count < push_constants.particles_to_spawn)
     {
-        uint spawned_count = particles_spawned[0];
         uint old_count;
         InterlockedCompareExchange(particles_spawned[0], spawned_count, spawned_count + 1, old_count);
         if (old_count == spawned_count)
