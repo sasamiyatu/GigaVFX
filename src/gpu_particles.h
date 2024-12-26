@@ -12,13 +12,17 @@ struct GPUParticleSystem
     struct Context* ctx = nullptr;
     VkBuffer shader_globals = VK_NULL_HANDLE;
     Buffer system_globals = {};
-    Buffer particle_buffer = {};
-    Buffer particles_scratch_buffer = {};
+
+    // Double buffered
+    Buffer particle_buffer[2] = {};
+    Buffer particle_system_state[2] = {};
+
     struct GraphicsPipelineAsset* render_pipeline = nullptr;
-    struct ComputePipelineAsset* particle_init_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_emit_pipeline = nullptr;
     struct ComputePipelineAsset* particle_simulate_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_compact_pipeline = nullptr;
     uint32_t particle_capacity = 0;
-    float particle_spawn_rate = 1.0f;
+    float particle_spawn_rate = 50.0f;
     float particles_to_spawn = 0.0f;
     bool particles_initialized = false;
 };

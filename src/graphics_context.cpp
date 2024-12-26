@@ -41,7 +41,19 @@ void Context::init(int window_width, int window_height)
         -> VkBool32 {
             auto severity = vkb::to_string_message_severity(messageSeverity);
             auto type = vkb::to_string_message_type(messageType);
-            LOG_ERROR("[%s: %s] %s\n", severity, type, pCallbackData->pMessage);
+            switch (messageSeverity)
+            {
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+                LOG_ERROR("[%s: %s] %s\n", severity, type, pCallbackData->pMessage);
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+                LOG_WARNING("[%s: %s] %s\n", severity, type, pCallbackData->pMessage);
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+                LOG_INFO("[%s: %s] %s\n", severity, type, pCallbackData->pMessage);
+                break;
+            }
             if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
             {
                 assert(false);
@@ -416,6 +428,9 @@ void Context::end_frame(VkCommandBuffer command_buffer)
     vkEndCommandBuffer(command_buffer);
 
     VK_CHECK(vkQueueSubmit(graphics_queue, 1, &info, frame_fences[frame_index]));
+
+    // For debugging sync issues
+    vkQueueWaitIdle(graphics_queue);
 
     VkPresentInfoKHR present_info{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     present_info.waitSemaphoreCount = 1;

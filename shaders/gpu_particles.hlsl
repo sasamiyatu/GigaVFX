@@ -1,4 +1,6 @@
 #include "shared.h"
+#include "math.hlsli"
+#include "random.hlsli"
 
 [[vk::binding(0)]] cbuffer globals {
     ShaderGlobals globals;
@@ -11,19 +13,33 @@
 
 [[vk::binding(2)]] RWStructuredBuffer<GPUParticle> particles;
 
-[[vk::binding(3)]] RWStructuredBuffer<uint> particles_spawned;
+[[vk::binding(3)]] RWStructuredBuffer<GPUParticleSystemState> particle_system_state;
+
+[[vk::binding(4)]] RWStructuredBuffer<GPUParticle> particles_compact_out;
+[[vk::binding(5)]] RWStructuredBuffer<GPUParticleSystemState> particle_system_state_out;
 
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
 
 [numthreads(64, 1, 1)]
-void cs_init_particles( uint3 thread_id : SV_DispatchThreadID )
+void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
 {
-    if (thread_id.x >= system_globals.particle_capacity)
+    if (thread_id.x >= push_constants.particles_to_spawn)
         return;
 
-    GPUParticle p = (GPUParticle)0;
-    particles[thread_id.x] = p;
+    if (particle_system_state[0].active_particle_count >= system_globals.particle_capacity)
+        return;
+
+    uint particle_index;
+    InterlockedAdd(particle_system_state[0].active_particle_count, 1, particle_index);
+
+    uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
+    float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
+    GPUParticle p;
+    p.lifetime = 3.0;
+    p.velocity = point_on_sphere;
+    p.position = float3(0, 1, 0) + point_on_sphere * 0.1;
+    particles[particle_index] = p;
 }
 
 [numthreads(64, 1, 1)]
@@ -32,36 +48,29 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     if (thread_id.x >= system_globals.particle_capacity)
         return;
 
-
     GPUParticle p = particles[thread_id.x];
-    uint spawned_count = particles_spawned[0];
     if (p.lifetime > 0.0)
     {
-        if (thread_id.x == 0) printf("Simulate\n");
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
-    else if (spawned_count < push_constants.particles_to_spawn)
-    {
-        uint old_count;
-        InterlockedCompareExchange(particles_spawned[0], spawned_count, spawned_count + 1, old_count);
-        if (old_count == spawned_count)
-        {
-            if (thread_id.x == 0) printf("Create\n");
-            p.lifetime = 3.0;
-            p.velocity = float3(0, 1, 0);
-            p.position = float3(0, 1, 0);        
-        }
-    }
-
-    if (thread_id.x == 0)
-        printf("pos: (%f %f %f), vel: (%f %f %f), life: %f, dt: %f\n", 
-            p.position.x, p.position.y, p.position.z,
-            p.velocity.x, p.velocity.y, p.velocity.z,
-            p.lifetime, push_constants.delta_time
-        );
 
     particles[thread_id.x] = p;
+}
+
+[numthreads(64, 1, 1)]
+void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
+{
+    if (thread_id.x >= system_globals.particle_capacity)
+        return;
+
+    GPUParticle p = particles[thread_id.x];
+    if (p.lifetime > 0.0)
+    {
+        uint particle_index;
+        InterlockedAdd(particle_system_state_out[0].active_particle_count, 1, particle_index);
+        particles_compact_out[particle_index] = p;
+    }    
 }
 
 struct VSInput

@@ -325,6 +325,7 @@ int main(int argc, char** argv)
 
     bool running = true;
     bool texture_catalog_open = true;
+    uint32_t frame_index = 0;
     while (running)
     {
         VkCommandBuffer command_buffer = ctx.begin_frame();
@@ -478,6 +479,7 @@ int main(int argc, char** argv)
             globals.sun_direction = glm::vec4(sundir, 1.0f);
             globals.sun_color_and_intensity = glm::vec4(1.0f);
             globals.resolution = glm::vec2((float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
+            globals.frame_index = frame_index;
 
             glm::vec4 origin_shift[4];
             float max_distance = 100.0f;
@@ -785,6 +787,7 @@ int main(int argc, char** argv)
         }
 
         ctx.end_frame(command_buffer);
+        frame_index++;
     }
 
     vkDeviceWaitIdle(ctx.device);

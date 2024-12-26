@@ -81,6 +81,7 @@ struct ShaderGlobals
     float4 sun_direction;
     float4 sun_color_and_intensity;
     float2 resolution;
+    uint frame_index;
 };
 
 struct ParticleRenderSettings
@@ -99,6 +100,11 @@ struct GPUParticleSystemGlobals
 {
     float4x4 transform;
     uint particle_capacity;
+};
+
+struct GPUParticleSystemState
+{
+    uint active_particle_count;
 };
 
 struct GPUParticle
