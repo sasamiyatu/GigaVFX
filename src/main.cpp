@@ -336,6 +336,14 @@ int main(int argc, char** argv)
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
+        { // Frame stats
+            ImGui::Begin("GPU Particle System");
+            ImGui::Text("Frame time: %f ms", ctx.smoothed_frame_time_ns * 1e-6f);
+            ImGui::Text("Particle simulate: %f us", gpu_particle_system.performance_timings.simulate_total * 1e-3f);
+            ImGui::Text("Particle render: %f us", gpu_particle_system.performance_timings.render_total * 1e-3f);
+            ImGui::End();
+        }
+
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
@@ -392,7 +400,7 @@ int main(int argc, char** argv)
         }
 
         //particle_system_manager.draw_ui();
-        gpu_particle_system.draw_stats_overlay();
+        //gpu_particle_system.draw_stats_overlay();
 
         movement_speed = std::max(movement_speed, 0.0f);
 

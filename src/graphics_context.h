@@ -49,6 +49,10 @@ struct Context
     VkFence frame_fences[frames_in_flight];
     VkSemaphore image_acquired_semaphore[frames_in_flight];
     VkSemaphore rendering_finished_semaphore[frames_in_flight];
+    VkQueryPool query_pool[frames_in_flight];
+
+    double smoothed_frame_time_ns = 0.0;
+    uint64_t frames_rendered = 0;
 
     void init(int window_width, int window_height);
 

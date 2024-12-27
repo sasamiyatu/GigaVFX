@@ -27,12 +27,13 @@ struct GPUParticleSystem
     struct ComputePipelineAsset* particle_simulate_pipeline = nullptr;
     struct ComputePipelineAsset* particle_compact_pipeline = nullptr;
     uint32_t particle_capacity = 0;
-    float particle_spawn_rate = 1000.0f;
+    float particle_spawn_rate = 10000.0f;
     float particles_to_spawn = 0.0f;
     bool particles_initialized = false;
 
     struct
     {
-        double total = 0.0;
+        double simulate_total = 0.0;
+        double render_total = 0.0;
     } performance_timings;
 };

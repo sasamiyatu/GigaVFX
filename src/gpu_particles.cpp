@@ -122,11 +122,15 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt)
 
 	if (!first)
 	{
-		uint32_t query_results[2];
-		vkGetQueryPoolResults(ctx->device, query_pool, 0, 2, sizeof(query_results), query_results, sizeof(uint32_t), 0);
-		uint32_t diff = query_results[1] - query_results[0];
+		uint64_t query_results[4];
+		vkGetQueryPoolResults(ctx->device, query_pool, 0, 4, sizeof(query_results), query_results, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+		uint64_t diff = query_results[1] - query_results[0];
 		double nanoseconds = ctx->physical_device.properties.limits.timestampPeriod * diff;
-		performance_timings.total = glm::mix(nanoseconds, performance_timings.total, 0.95);
+		performance_timings.simulate_total = glm::mix(nanoseconds, performance_timings.simulate_total, 0.95);
+
+		uint64_t delta_render = query_results[3] - query_results[2];
+		double ns_render = ctx->physical_device.properties.limits.timestampPeriod * delta_render;
+		performance_timings.render_total = glm::mix(ns_render, performance_timings.render_total, 0.95);
 	}
 
 	first = false;
@@ -271,6 +275,8 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt)
 
 void GPUParticleSystem::render(VkCommandBuffer cmd)
 {
+	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, query_pool, 2);
+
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
 	DescriptorInfo descriptor_info[] = {
 		DescriptorInfo(shader_globals),
@@ -283,6 +289,8 @@ void GPUParticleSystem::render(VkCommandBuffer cmd)
 	};
 	vkCmdPushDescriptorSetWithTemplateKHR(cmd, render_pipeline->pipeline.descriptor_update_template, render_pipeline->pipeline.layout, 0, descriptor_info);
 	vkCmdDraw(cmd, 1, particle_capacity, 0, 0);
+
+	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool, 3);
 }
 
 void GPUParticleSystem::destroy()
@@ -305,6 +313,6 @@ void GPUParticleSystem::destroy()
 void GPUParticleSystem::draw_stats_overlay()
 {
 	ImGui::Begin("GPU Particle System");
-	ImGui::Text("Simulation time: %f us", performance_timings.total * 1e-3f);
+	ImGui::Text("Simulation time: %f us", performance_timings.simulate_total * 1e-3f);
 	ImGui::End();
 }

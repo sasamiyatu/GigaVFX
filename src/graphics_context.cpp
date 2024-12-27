@@ -8,6 +8,7 @@
 #include "imgui/imgui_impl_vulkan.h"
 
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
+constexpr uint32_t QUERY_COUNT = 256;
 
 void Context::init(int window_width, int window_height)
 {
@@ -189,6 +190,11 @@ void Context::init(int window_width, int window_height)
         VkSemaphoreCreateInfo semaphore_info{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         VK_CHECK(vkCreateSemaphore(device, &semaphore_info, nullptr, &image_acquired_semaphore[i]));
         VK_CHECK(vkCreateSemaphore(device, &semaphore_info, nullptr, &rendering_finished_semaphore[i]));
+
+        VkQueryPoolCreateInfo query_pool_info{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+        query_pool_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        query_pool_info.queryCount = QUERY_COUNT;
+        VK_CHECK(vkCreateQueryPool(device.device, &query_pool_info, nullptr, &query_pool[i]));
     }
 
     {
@@ -295,7 +301,7 @@ void Context::init(int window_width, int window_height)
     }
 
     // Samplers
-    {
+    { // Bilinear sampler
         VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
         info.magFilter = VK_FILTER_LINEAR;
         info.minFilter = VK_FILTER_LINEAR;
@@ -308,7 +314,7 @@ void Context::init(int window_width, int window_height)
         VK_CHECK(vkCreateSampler(device, &info, nullptr, &samplers.bilinear_clamp));
     }
 
-    {
+    { // Nearest-neighbor sampler
         VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
         info.magFilter = VK_FILTER_NEAREST;
         info.minFilter = VK_FILTER_NEAREST;
@@ -342,6 +348,7 @@ void Context::shutdown()
         vkDestroyFence(device, frame_fences[i], nullptr);
         vkDestroySemaphore(device, image_acquired_semaphore[i], nullptr);
         vkDestroySemaphore(device, rendering_finished_semaphore[i], nullptr);
+        vkDestroyQueryPool(device, query_pool[i], nullptr);
     }
     vkDestroyCommandPool(device, transfer_command_pool, nullptr);
 
@@ -366,11 +373,23 @@ VkCommandBuffer Context::begin_frame()
 
     VK_CHECK(vkResetCommandPool(device, command_pools[frame_index], 0));
 
+    if (frames_rendered > frames_in_flight)
+    { // Timing
+        uint64_t timestamp_results[2];
+        vkGetQueryPoolResults(device, query_pool[frame_index], 0, 2, sizeof(timestamp_results), timestamp_results, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+        uint64_t delta = timestamp_results[1] - timestamp_results[0];
+        double delta_ns = (double)delta * (double)device.physical_device.properties.limits.timestampPeriod;
+        smoothed_frame_time_ns = glm::mix(delta_ns, smoothed_frame_time_ns, 0.95);
+    }
+
     VkCommandBuffer cmd = command_buffers[frame_index];
 
     VkCommandBufferBeginInfo cmd_info{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     cmd_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmd_info));
+
+    vkCmdResetQueryPool(cmd, query_pool[frame_index], 0, 2);
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, query_pool[frame_index], 0);
 
     VkImageMemoryBarrier2 image_barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
     image_barrier.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -425,6 +444,8 @@ void Context::end_frame(VkCommandBuffer command_buffer)
     dep_info.pImageMemoryBarriers = &image_barrier;
     vkCmdPipelineBarrier2(command_buffer, &dep_info);
 
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool[frame_index], 1);
+
     vkEndCommandBuffer(command_buffer);
 
     VK_CHECK(vkQueueSubmit(graphics_queue, 1, &info, frame_fences[frame_index]));
@@ -441,6 +462,7 @@ void Context::end_frame(VkCommandBuffer command_buffer)
     VK_CHECK(vkQueuePresentKHR(graphics_queue, &present_info));
 
     frame_index = (frame_index + 1) % frames_in_flight;
+    frames_rendered++;
 }
 
 

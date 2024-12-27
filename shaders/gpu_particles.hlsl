@@ -38,7 +38,7 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
     float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
     GPUParticle p;
-    p.lifetime = 3.0;
+    p.lifetime = 0.1;
     p.velocity = point_on_sphere;
     p.position = float3(0, 1, 0) + point_on_sphere * 0.1;
     particles[particle_index] = p;
