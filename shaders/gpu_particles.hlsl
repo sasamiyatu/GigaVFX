@@ -32,16 +32,22 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     if (particle_system_state[0].active_particle_count >= system_globals.particle_capacity)
         return;
 
-    uint particle_index;
-    InterlockedAdd(particle_system_state[0].active_particle_count, 1, particle_index);
+    uint lane_spawn_count = WaveActiveCountBits(true); // == Number of threads that passed the early return checks
+    uint local_index = WaveGetLaneIndex();
+    uint global_particle_index;
+
+    if (WaveIsFirstLane())
+        InterlockedAdd(particle_system_state[0].active_particle_count, lane_spawn_count, global_particle_index);
+
+    global_particle_index = WaveReadLaneFirst(global_particle_index);
 
     uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
     float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
     GPUParticle p;
-    p.lifetime = 1.0;
+    p.lifetime = 3.0;
     p.velocity = point_on_sphere;
     p.position = float3(0, 1, 0) + point_on_sphere * 0.1;
-    particles[particle_index] = p;
+    particles[global_particle_index + local_index] = p;
 }
 
 [numthreads(64, 1, 1)]
@@ -88,12 +94,23 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
         return;
 
     GPUParticle p = particles[thread_id.x];
-    if (p.lifetime > 0.0)
+
+    bool alive = p.lifetime > 0.0;
+    uint local_index = WavePrefixCountBits(alive);
+    uint alive_count = WaveActiveCountBits(alive);
+
+    if (alive_count == 0) return;
+
+    uint global_particle_index;
+    if (WaveIsFirstLane())
     {
-        uint particle_index;
-        InterlockedAdd(particle_system_state_out[0].active_particle_count, 1, particle_index);
-        particles_compact_out[particle_index] = p;
-    }    
+        InterlockedAdd(particle_system_state_out[0].active_particle_count, alive_count, global_particle_index);
+    }
+
+    global_particle_index = WaveReadLaneFirst(global_particle_index);
+
+    if (alive)
+        particles_compact_out[global_particle_index + local_index] = p;
 }
 
 struct VSInput

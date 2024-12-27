@@ -91,6 +91,7 @@ uint32_t* Shaders::load_shader(const char* filepath, const char* entry_point, Vk
 		L"-T", get_shader_type_str(shader_stage),
 		L"-Zs", L"-spirv",
 		L"-fvk-use-scalar-layout",
+		L"-fspv-target-env=vulkan1.3",
 		L"-HV 2021",
 #if OPTIMIZE_SHADERS
 		L"-O3"

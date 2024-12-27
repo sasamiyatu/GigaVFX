@@ -10,6 +10,8 @@
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
 constexpr uint32_t QUERY_COUNT = 256;
 
+#define VSYNC 0
+
 void Context::init(int window_width, int window_height)
 {
     SDL_Init(SDL_INIT_VIDEO);
@@ -148,6 +150,9 @@ void Context::init(int window_width, int window_height)
     vkb::SwapchainBuilder swapchain_builder{ device };
     swapchain_builder.set_desired_format({ VK_FORMAT_B8G8R8A8_UNORM, VK_COLORSPACE_SRGB_NONLINEAR_KHR });
     swapchain_builder.set_image_usage_flags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+#if VSYNC
+    swapchain_builder.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR);
+#endif
     auto swap_ret = swapchain_builder.build();
     if (!swap_ret) {
         LOG_ERROR("Failed to create swapchain!");

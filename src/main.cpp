@@ -319,6 +319,7 @@ int main(int argc, char** argv)
 
     //constexpr uint32_t particle_capacity = 32768;
     constexpr uint32_t particle_capacity = 1048576;
+    //constexpr uint32_t particle_capacity = 8;
     GPUParticleSystem gpu_particle_system;
     gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity);
 

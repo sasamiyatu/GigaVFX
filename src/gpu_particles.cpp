@@ -121,7 +121,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt)
 	particles_to_spawn += particle_spawn_rate * dt;
 
 	if (!first)
-	{
+	{ // TODO: This performance timing stuff is probably incorrect when multiple frames are in flight
 		uint64_t query_results[4];
 		vkGetQueryPoolResults(ctx->device, query_pool, 0, 4, sizeof(query_results), query_results, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
 		uint64_t diff = query_results[1] - query_results[0];
