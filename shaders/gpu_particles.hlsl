@@ -18,6 +18,8 @@
 [[vk::binding(4)]] RWStructuredBuffer<GPUParticle> particles_compact_out;
 [[vk::binding(5)]] RWStructuredBuffer<GPUParticleSystemState> particle_system_state_out;
 
+[[vk::binding(6)]] RWStructuredBuffer<DispatchIndirectCommand> indirect_dispatch;
+
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
 
@@ -45,7 +47,7 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
 [numthreads(64, 1, 1)]
 void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
 {
-    if (thread_id.x >= system_globals.particle_capacity)
+    if (thread_id.x >= particle_system_state[0].active_particle_count)
         return;
 
     GPUParticle p = particles[thread_id.x];
@@ -58,10 +60,24 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     particles[thread_id.x] = p;
 }
 
+
+[numthreads(1, 1, 1)]
+void cs_write_dispatch( uint3 thread_id : SV_DispatchThreadID )
+{
+    uint size = (particle_system_state[0].active_particle_count + 63) / 64;
+
+    DispatchIndirectCommand command;
+    command.x = size;
+    command.y = 1;
+    command.z = 1;
+
+    indirect_dispatch[0] = command;
+}
+
 [numthreads(64, 1, 1)]
 void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
 {
-    if (thread_id.x >= system_globals.particle_capacity)
+    if (thread_id.x >= particle_system_state[0].active_particle_count)
         return;
 
     GPUParticle p = particles[thread_id.x];

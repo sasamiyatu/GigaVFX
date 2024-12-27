@@ -317,7 +317,8 @@ int main(int argc, char** argv)
     ParticleSystemManager particle_system_manager;
     particle_system_manager.init(&particle_renderer);
 
-    constexpr uint32_t particle_capacity = 256;
+    //constexpr uint32_t particle_capacity = 32768;
+    constexpr uint32_t particle_capacity = 1048576;
     GPUParticleSystem gpu_particle_system;
     gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity);
 
@@ -387,10 +388,11 @@ int main(int argc, char** argv)
 
         if (texture_catalog_open)
         {
-            texture_catalog.draw_ui(&texture_catalog_open);
+            //texture_catalog.draw_ui(&texture_catalog_open);
         }
 
-        particle_system_manager.draw_ui();
+        //particle_system_manager.draw_ui();
+        gpu_particle_system.draw_stats_overlay();
 
         movement_speed = std::max(movement_speed, 0.0f);
 

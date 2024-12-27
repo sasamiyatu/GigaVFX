@@ -102,9 +102,17 @@ struct GPUParticleSystemGlobals
     uint particle_capacity;
 };
 
+struct DispatchIndirectCommand 
+{
+    uint x;
+    uint y;
+    uint z;
+};
+
 struct GPUParticleSystemState
 {
     uint active_particle_count;
+    DispatchIndirectCommand simulate_command;
 };
 
 struct GPUParticle
@@ -113,3 +121,4 @@ struct GPUParticle
     float3 velocity;
     float lifetime; // alive if > 0
 };
+
