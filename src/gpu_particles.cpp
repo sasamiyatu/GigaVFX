@@ -231,7 +231,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt)
 		particles_to_spawn -= std::floor(particles_to_spawn);
 		vkCmdPushConstants(cmd, particle_simulate_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 		vkCmdDispatchIndirect(cmd, indirect_dispatch_buffer.buffer, 0);
-;		//vkCmdDispatch(cmd, get_dispatch_size(particle_capacity), 1, 1);
 
 		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -248,11 +247,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt)
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_compact_pipeline->pipeline.pipeline);
 		vkCmdPushDescriptorSetWithTemplateKHR(cmd, particle_compact_pipeline->pipeline.descriptor_update_template,
 			particle_compact_pipeline->pipeline.layout, 0, descriptor_info);
-		GPUParticlePushConstants pc{};
-		pc.delta_time = dt;
-		pc.particles_to_spawn = (uint32_t)particles_to_spawn;
-		vkCmdPushConstants(cmd, particle_compact_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
-		//vkCmdDispatch(cmd, get_dispatch_size(particle_capacity), 1, 1);
 		vkCmdDispatchIndirect(cmd, indirect_dispatch_buffer.buffer, 0);
 
 		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };

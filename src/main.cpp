@@ -651,7 +651,7 @@ int main(int argc, char** argv)
                 {
                     pc.material_index = primitive.material;
 
-                    vkCmdPushConstants(command_buffer, shadowmap_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+                    vkCmdPushConstants(command_buffer, shadowmap_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
                     vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
                 }
             }

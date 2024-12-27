@@ -217,6 +217,9 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
     rendering_create_info.pColorAttachmentFormats = color_attachment_formats;
 
     std::vector<VkDescriptorUpdateTemplateEntry> descriptor_template_entries;
+    uint8_t descriptor_set_mask = 0;
+    for (uint32_t i = 0; i < max_descriptor_set_layouts; ++i)
+        descriptor_set_mask |= (int)set_layout_passed_from_outside[i] << i;
 
     for (size_t i = 0; i < pipeline_create_info.stageCount; ++i)
     {
@@ -227,57 +230,84 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
         info.pCode = shader_sources[i].spirv;
         VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &shader_stage_create_info[i].module));
     }
-    //if (pipeline_create_info.layout == VK_NULL_HANDLE)
+
     { // Create the layout
-        std::vector<VkDescriptorSetLayoutBinding> bindings[4];
         uint32_t push_constant_size = 0;
-        VkShaderStageFlags pc_stage_flags = 0;
+        VkShaderStageFlags push_constant_stage_flags = 0;
+        std::vector<VkDescriptorSetLayoutBinding> bindings[4];
         for (uint32_t i = 0; i < pipeline_create_info.stageCount; ++i)
         {
             SpvReflectShaderModule mod;
             SpvReflectResult result = spvReflectCreateShaderModule(shader_sources[i].size, shader_sources[i].spirv, &mod);
             assert(result == SPV_REFLECT_RESULT_SUCCESS);
-            descriptor_set_layout_count = std::max(mod.descriptor_set_count, descriptor_set_layout_count);
             uint32_t pc_size = 0;
             for (uint32_t j = 0; j < mod.push_constant_block_count; ++j)
             {
                 pc_size += mod.push_constant_blocks[j].size;
-                pc_stage_flags |= mod.shader_stage;
+                push_constant_stage_flags |= mod.shader_stage;
             }
 
             push_constant_size = std::max(push_constant_size, pc_size);
             for (uint32_t j = 0; j < mod.descriptor_set_count; ++j)
             {
-                if (set_layout_passed_from_outside[j]) continue;
                 SpvReflectDescriptorSet descriptor_set = mod.descriptor_sets[j];
-                bindings[j].resize(std::max(descriptor_set.binding_count, (uint32_t)bindings[j].size()));
-                if (j == 0) descriptor_template_entries.resize(std::max((uint32_t)descriptor_template_entries.size(), descriptor_set.binding_count));
+                if (set_layout_passed_from_outside[descriptor_set.set]) continue;
+
+                descriptor_set_mask |= (1 << descriptor_set.set);
+
+                // TODO: This is probably wrong, we probably want this to be the maximum binding
+                //if (j == 0) descriptor_template_entries.resize(descriptor_set.binding_count);
 
                 for (uint32_t k = 0; k < descriptor_set.binding_count; ++k)
                 {
                     SpvReflectDescriptorBinding* binding = descriptor_set.bindings[k];
-                    VkDescriptorSetLayoutBinding& out_binding = bindings[j][binding->binding];
+
+                    auto previous_binding_entry = std::find_if(bindings[j].begin(), bindings[j].end(), [&](const VkDescriptorSetLayoutBinding& b)
+                        {
+                            return b.binding == binding->binding;
+                        }
+                    );
+
+                    bool binding_exists = previous_binding_entry != bindings[j].end();
+
+                    if (binding_exists)
+                    {
+                        assert(previous_binding_entry->binding == binding->binding);
+                        assert(previous_binding_entry->descriptorCount == binding->count);
+                        assert(previous_binding_entry->descriptorType == (VkDescriptorType)binding->descriptor_type);
+                        previous_binding_entry->stageFlags |= mod.shader_stage;
+                        continue;
+                    }
+
+                    VkDescriptorSetLayoutBinding out_binding{};// = bindings[j][binding->binding];
                     out_binding.binding = binding->binding;
                     out_binding.descriptorCount = binding->count;
                     out_binding.descriptorType = (VkDescriptorType)binding->descriptor_type;
                     out_binding.stageFlags |= mod.shader_stage;
+                    bindings[j].push_back(out_binding);
 
                     if (j == 0) // Only create update template for set 0 for now
                     {
-                        VkDescriptorUpdateTemplateEntry& entry = descriptor_template_entries[binding->binding];
+                        VkDescriptorUpdateTemplateEntry entry{}; //= descriptor_template_entries[binding->binding];
                         entry.dstBinding = binding->binding;
                         entry.dstArrayElement = 0;
                         entry.descriptorCount = binding->count;
                         entry.descriptorType = (VkDescriptorType)binding->descriptor_type;
                         entry.offset = binding->binding * sizeof(DescriptorInfo);
                         entry.stride = sizeof(DescriptorInfo);
+                        descriptor_template_entries.push_back(entry);
                     }
                 }
             }
         }
 
-        for (uint32_t i = 0; i < descriptor_set_layout_count; ++i)
+        uint32_t set_layout_count = 0;
+        for (uint32_t i = 0; i < max_descriptor_set_layouts; ++i)
         {
+            if (!(descriptor_set_mask & (1 << i))) continue;
+
+            set_layout_count++;
+
             if (set_layout_passed_from_outside[i]) continue;
             VkDescriptorSetLayoutCreateInfo info{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
             info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
@@ -289,10 +319,10 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 
 
         VkPipelineLayoutCreateInfo info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-        info.setLayoutCount = descriptor_set_layout_count;
+        info.setLayoutCount = set_layout_count;
         info.pSetLayouts = set_layouts;
         VkPushConstantRange range{};
-        range.stageFlags = pc_stage_flags;
+        range.stageFlags = push_constant_stage_flags;
         range.size = push_constant_size;
         info.pPushConstantRanges = &range;
         info.pushConstantRangeCount = push_constant_size != 0 ? 1 : 0;
@@ -300,8 +330,10 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
         VK_CHECK(vkCreatePipelineLayout(device, &info, nullptr, &layout));
         pipeline_create_info.layout = layout;
         pp.layout = layout;
-        pp.descriptor_set_count = descriptor_set_layout_count;
-        memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * descriptor_set_layout_count);
+        pp.descriptor_set_count = set_layout_count;
+        pp.push_constants_size = push_constant_size;
+        pp.push_constant_stages = push_constant_stage_flags;
+        memcpy(pp.set_layouts, set_layouts, sizeof(VkDescriptorSetLayout) * set_layout_count);
     }
 
     VkDescriptorUpdateTemplateCreateInfo desc_template_info{ VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO };
@@ -416,15 +448,16 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
         {
             if (set_layout_passed_from_outside[j]) continue;
             SpvReflectDescriptorSet descriptor_set = mod.descriptor_sets[j];
-            bindings[j].resize(std::max(descriptor_set.binding_count, (uint32_t)bindings[j].size()));
             for (uint32_t k = 0; k < descriptor_set.binding_count; ++k)
             {
                 SpvReflectDescriptorBinding* binding = descriptor_set.bindings[k];
-                VkDescriptorSetLayoutBinding& out_binding = bindings[j][k];
+
+                VkDescriptorSetLayoutBinding out_binding{};// = bindings[j][k];
                 out_binding.binding = binding->binding;
                 out_binding.descriptorCount = binding->count;
                 out_binding.descriptorType = (VkDescriptorType)binding->descriptor_type;
                 out_binding.stageFlags |= mod.shader_stage;
+                bindings[j].push_back(out_binding);
 
                 if (j == 0) // Only create update template for set 0 for now
                 {
@@ -433,7 +466,7 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
                     entry.dstArrayElement = 0;
                     entry.descriptorCount = binding->count;
                     entry.descriptorType = (VkDescriptorType)binding->descriptor_type;
-                    entry.offset = k * sizeof(DescriptorInfo);
+                    entry.offset = binding->binding * sizeof(DescriptorInfo);
                     entry.stride = sizeof(DescriptorInfo);
                     descriptor_template_entries.push_back(entry);
                 }

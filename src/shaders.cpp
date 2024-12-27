@@ -12,6 +12,8 @@
 
 #include "misc.h"
 
+#define OPTIMIZE_SHADERS 1
+
 namespace
 {
 	static CComPtr<IDxcUtils> dxc_utils;
@@ -90,7 +92,11 @@ uint32_t* Shaders::load_shader(const char* filepath, const char* entry_point, Vk
 		L"-Zs", L"-spirv",
 		L"-fvk-use-scalar-layout",
 		L"-HV 2021",
+#if OPTIMIZE_SHADERS
+		L"-O3"
+#else
 		L"-O0"
+#endif
 	};
 
 	CComPtr<IDxcResult> results;

@@ -47,6 +47,8 @@ struct Pipeline
     VkDescriptorSetLayout set_layouts[4] = {};
     uint32_t descriptor_set_count = 0;
     VkDescriptorUpdateTemplate descriptor_update_template = VK_NULL_HANDLE;
+    VkShaderStageFlags push_constant_stages;
+    uint32_t push_constants_size;
 };
 
 struct GraphicsPipelineBuilder
@@ -90,7 +92,6 @@ struct GraphicsPipelineBuilder
 
     VkDescriptorSetLayout set_layouts[max_descriptor_set_layouts] = {};
     bool set_layout_passed_from_outside[max_descriptor_set_layouts] = { false };
-    uint32_t descriptor_set_layout_count = 0;
 
     GraphicsPipelineBuilder(VkDevice dev, bool enable_shader_hot_reload);
 
