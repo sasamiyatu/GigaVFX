@@ -51,4 +51,15 @@ namespace VkHelpers
 
 		return image_barrier;
 	}
+
+	inline void full_barrier(VkCommandBuffer cmd)
+	{
+		VkMemoryBarrier memory_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+		memory_barrier.srcAccessMask = 0;
+		memory_barrier.dstAccessMask = 0;
+		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+			1, &memory_barrier,
+			0, nullptr,
+			0, nullptr);
+	}
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include "defines.h"
 #include "buffer.h"
+#include "radix_sort.h"
 
 struct GPUParticleSystem
 {
@@ -30,6 +31,8 @@ struct GPUParticleSystem
     float particle_spawn_rate = 10000.0f;
     float particles_to_spawn = 0.0f;
     bool particles_initialized = false;
+
+    RadixSortContext* sort_context = nullptr;
 
     struct
     {

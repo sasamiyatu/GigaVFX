@@ -29,6 +29,7 @@
 #include "random.h"
 #include "texture_catalog.h"    
 #include "gpu_particles.h"
+#include "radix_sort.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
@@ -324,6 +325,8 @@ int main(int argc, char** argv)
     gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity);
 
     std::vector<MeshInstance> mesh_draws;
+
+    test_radix_sort(&ctx);
 
     bool running = true;
     bool texture_catalog_open = true;

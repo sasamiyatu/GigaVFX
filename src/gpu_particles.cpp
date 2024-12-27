@@ -113,6 +113,10 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		info.queryType = VK_QUERY_TYPE_TIMESTAMP;
 		VK_CHECK(vkCreateQueryPool(ctx->device, &info, nullptr, &query_pool));
 	}
+
+	{ // Radix sort context
+		sort_context = radix_sort_context_create(ctx, particle_capacity);
+	}
 }
 
 void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt)
@@ -295,6 +299,11 @@ void GPUParticleSystem::render(VkCommandBuffer cmd)
 
 void GPUParticleSystem::destroy()
 {
+	if (sort_context)
+	{
+		radix_sort_context_destroy(sort_context); 
+		sort_context = nullptr;
+	}
 	render_pipeline->builder.destroy_resources(render_pipeline->pipeline);
 	particle_emit_pipeline->builder.destroy_resources(particle_emit_pipeline->pipeline);
 	particle_dispatch_size_pipeline->builder.destroy_resources(particle_dispatch_size_pipeline->pipeline);

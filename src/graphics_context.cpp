@@ -751,7 +751,7 @@ bool Context::create_textures(Texture* textures, uint32_t count)
 }
 
 // TODO: Allow creating device local buffers with upload via staging buffer
-Buffer Context::create_buffer(const BufferDesc& desc)
+Buffer Context::create_buffer(const BufferDesc& desc, size_t alignment)
 {
     VkBufferCreateInfo buffer_info{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     buffer_info.size = desc.size;
@@ -763,7 +763,10 @@ Buffer Context::create_buffer(const BufferDesc& desc)
 
     VkBuffer buffer = VK_NULL_HANDLE;
     VmaAllocation allocation;
-    VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &allocation_info, &buffer, &allocation, nullptr));
+    if (alignment != 0)
+        VK_CHECK(vmaCreateBufferWithAlignment(allocator, &buffer_info, &allocation_info, alignment, &buffer, &allocation, nullptr));
+    else
+        VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &allocation_info, &buffer, &allocation, nullptr));
 
     if (desc.data)
     {
