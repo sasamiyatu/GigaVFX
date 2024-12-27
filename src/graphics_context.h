@@ -51,6 +51,8 @@ struct Context
     VkSemaphore rendering_finished_semaphore[frames_in_flight];
     VkQueryPool query_pool[frames_in_flight];
 
+    struct radix_sort_vk* radix_sort_instance = nullptr;
+
     double smoothed_frame_time_ns = 0.0;
     uint64_t frames_rendered = 0;
 

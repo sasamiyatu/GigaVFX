@@ -1,4 +1,4 @@
-#define VOLK_IMPLEMENTATION
+//#define VOLK_IMPLEMENTATION
 #include "graphics_context.h"
 #include "vk_helpers.h"
 #include "buffer.h"
@@ -6,6 +6,7 @@
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
 #include "imgui/imgui_impl_vulkan.h"
+#include "radix_sort/radix_sort_vk.h"
 
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
 constexpr uint32_t QUERY_COUNT = 256;
@@ -132,6 +133,50 @@ void Context::init(int window_width, int window_height)
         LOG_INFO("%s", e.c_str());
     }
 
+    // Enable features / extensions required by vk-radix-sort
+    VkPhysicalDeviceProperties2 props2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+    VkPhysicalDeviceSubgroupProperties subgroup_props{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES };
+    props2.pNext = &subgroup_props;
+    vkGetPhysicalDeviceProperties2(physical_device, &props2);
+
+    radix_sort_vk_target_t* target = radix_sort_vk_target_auto_detect(&physical_device.properties, &subgroup_props, 1);
+    radix_sort_vk_target_requirements_t requirements{};
+    VkPhysicalDeviceFeatures radix_sort_required_feats{};
+    VkPhysicalDeviceVulkan11Features radix_sort_required_vk_11_feats{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
+    VkPhysicalDeviceVulkan12Features radix_sort_required_vk_12_feats{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    requirements.pdf = &radix_sort_required_feats;
+    requirements.pdf11 = &radix_sort_required_vk_11_feats;
+    requirements.pdf12 = &radix_sort_required_vk_12_feats;
+    bool radix_sort_supported = radix_sort_vk_target_get_requirements(target, &requirements);
+    if (!radix_sort_supported && requirements.ext_name_count > 0)
+    { // Requires enabling extensions, try again
+        // NOTE: This code path is untested! (Tested device does not have additional extensions required by vk-radix-sort)
+        std::vector<const char*> ext_names(requirements.ext_name_count);
+        requirements.ext_names = ext_names.data();
+        radix_sort_supported = radix_sort_vk_target_get_requirements(target, &requirements);
+        bool extensions_supported = physical_device.enable_extensions_if_present(ext_names);
+        if (!extensions_supported)
+        {
+            LOG_ERROR("Vulkan extensions required by vk-radix-sort are not supported!");
+            exit(-1);
+        }
+    }
+    if (!radix_sort_supported)
+    {
+        LOG_ERROR("Physical Device does not meet vk-radix-sort requirements!");
+        exit(-1);
+    }
+
+    bool radix_sort_features_enabled = 
+        physical_device.enable_features_if_present(radix_sort_required_feats) && 
+        physical_device.enable_extension_features_if_present(radix_sort_required_vk_11_feats) &&
+        physical_device.enable_extension_features_if_present(radix_sort_required_vk_12_feats);
+    if (!radix_sort_features_enabled)
+    {
+        LOG_ERROR("Failed to enable Vulkan features required by vk-radix-sort!");
+        exit(-1);
+    }
+
     vkb::DeviceBuilder device_builder{ physical_device };
     auto dev_ret = device_builder.build();
     if (!dev_ret) {
@@ -141,6 +186,13 @@ void Context::init(int window_width, int window_height)
     }
     device = dev_ret.value();
     volkLoadDevice(device.device);
+
+    radix_sort_instance = radix_sort_vk_create(device.device, nullptr, VK_NULL_HANDLE, target);
+    if (!radix_sort_instance)
+    {
+        LOG_ERROR("Failed to create vk-radix-sort instance!");
+        exit(-1);
+    }
 
     graphics_queue_family_index = device.get_queue_index(vkb::QueueType::graphics).value();
     graphics_queue = device.get_queue(vkb::QueueType::graphics).value();
@@ -339,6 +391,8 @@ void Context::shutdown()
     ImGui::DestroyContext();
 
     vmaDestroyAllocator(allocator);
+
+    if (radix_sort_instance) radix_sort_vk_destroy(radix_sort_instance, device.device, nullptr);
 
     for (auto& t : swapchain_textures)
     {

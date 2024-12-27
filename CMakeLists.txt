@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(Gigasticle VERSION 0.0.1 LANGUAGES CXX)
+project(Gigasticle VERSION 0.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,6 +52,8 @@ compile_shader(shaders/forward.hlsl vs_6_6 vs_main)
 compile_shader(shaders/forward.hlsl ps_6_6 fs_main)
 compile_shader(shaders/procedural_sky.hlsl cs_6_6 cs_main)
 
+add_subdirectory(external/vk-radix-sort)
+
 cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
     WHENCE shaders/generated
     PREFIX shaders/
@@ -80,12 +82,13 @@ add_executable(gigasticle
     src/particle_system.cpp
     src/pipeline.h
     src/pipeline.cpp
+    src/radix_sort.h
+    src/radix_sort.cpp
     src/random.h
     src/shaders.h
     src/shaders.cpp
     src/spirv_reflect.c
     src/spirv_reflect.h
-    src/spirv_reflect.cpp
     src/stb_image.h
     src/texture.h
     src/texture.cpp
@@ -125,7 +128,7 @@ target_link_libraries(gigasticle PUBLIC Shaders::precompiled)
 # End shader stuff
 #===========================================================================================
 
-target_link_libraries(gigasticle PUBLIC SDL2::SDL2 Vulkan::Vulkan Vulkan::dxc_lib)
+target_link_libraries(gigasticle PUBLIC SDL2::SDL2 Vulkan::dxc_lib Vulkan::volk vk-radix-sort)
 set_target_properties(
     gigasticle
     PROPERTIES
