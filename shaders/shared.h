@@ -102,11 +102,27 @@ struct GPUParticleSystemGlobals
     uint particle_capacity;
 };
 
+// Matches VkDispatchIndirectCommand
 struct DispatchIndirectCommand 
 {
     uint x;
     uint y;
     uint z;
+};
+
+// Matches VkDrawIndirectCommand 
+struct DrawIndirectCommand 
+{
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+struct GPUParticleIndirectData
+{
+    DispatchIndirectCommand dispatch_cmd;
+    DrawIndirectCommand draw_cmd;
 };
 
 struct GPUParticleSystemState

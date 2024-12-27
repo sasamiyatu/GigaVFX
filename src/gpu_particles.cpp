@@ -102,7 +102,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 	{ // Indirect dispatch buffer
 		BufferDesc desc{};
-		desc.size = sizeof(VkDispatchIndirectCommand);
+		desc.size = sizeof(GPUParticleIndirectData);
 		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 		indirect_dispatch_buffer = ctx->create_buffer(desc);
 	}
@@ -288,7 +288,7 @@ void GPUParticleSystem::render(VkCommandBuffer cmd)
 		DescriptorInfo(indirect_dispatch_buffer.buffer),
 	};
 	vkCmdPushDescriptorSetWithTemplateKHR(cmd, render_pipeline->pipeline.descriptor_update_template, render_pipeline->pipeline.layout, 0, descriptor_info);
-	vkCmdDraw(cmd, 1, particle_capacity, 0, 0);
+	vkCmdDrawIndirect(cmd, indirect_dispatch_buffer.buffer, offsetof(GPUParticleIndirectData, draw_cmd), 1, sizeof(GPUParticleIndirectData));
 
 	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool, 3);
 }

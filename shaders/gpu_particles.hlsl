@@ -18,7 +18,7 @@
 [[vk::binding(4)]] RWStructuredBuffer<GPUParticle> particles_compact_out;
 [[vk::binding(5)]] RWStructuredBuffer<GPUParticleSystemState> particle_system_state_out;
 
-[[vk::binding(6)]] RWStructuredBuffer<DispatchIndirectCommand> indirect_dispatch;
+[[vk::binding(6)]] RWStructuredBuffer<GPUParticleIndirectData> indirect_dispatch;
 
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
@@ -38,7 +38,7 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
     float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
     GPUParticle p;
-    p.lifetime = 0.1;
+    p.lifetime = 1.0;
     p.velocity = point_on_sphere;
     p.position = float3(0, 1, 0) + point_on_sphere * 0.1;
     particles[particle_index] = p;
@@ -71,7 +71,14 @@ void cs_write_dispatch( uint3 thread_id : SV_DispatchThreadID )
     command.y = 1;
     command.z = 1;
 
-    indirect_dispatch[0] = command;
+    DrawIndirectCommand draw_cmd;
+    draw_cmd.vertexCount = 1;
+    draw_cmd.instanceCount = particle_system_state[0].active_particle_count;
+    draw_cmd.firstVertex = 0;
+    draw_cmd.firstInstance = 0;
+
+    indirect_dispatch[0].dispatch_cmd = command;
+    indirect_dispatch[0].draw_cmd = draw_cmd;
 }
 
 [numthreads(64, 1, 1)]
