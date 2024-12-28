@@ -109,6 +109,12 @@ void Context::init(int window_width, int window_height)
     features.shaderInt64 = VK_TRUE;
     features.samplerAnisotropy = VK_TRUE;
 
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration_structure_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+    acceleration_structure_features.accelerationStructure = VK_TRUE;
+
+    VkPhysicalDeviceRayQueryFeaturesKHR ray_query_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+    ray_query_features.rayQuery = VK_TRUE;
+
     vkb::PhysicalDeviceSelector phys_device_selector(instance);
     auto physical_device_selector_return = phys_device_selector
         .set_surface(surface)
@@ -116,7 +122,14 @@ void Context::init(int window_width, int window_height)
         .set_required_features_11(vulkan_11_features)
         .set_required_features_12(vulkan_12_features)
         .set_required_features_13(vulkan_13_features)
-        .add_required_extensions({ VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME })
+        .add_required_extension_features(acceleration_structure_features)
+        .add_required_extension_features(ray_query_features)
+        .add_required_extensions({ 
+            VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+            VK_KHR_RAY_QUERY_EXTENSION_NAME,
+        })
         .select();
     if (!physical_device_selector_return) {
         // Handle error
@@ -789,6 +802,38 @@ void Context::destroy_buffer(Buffer& buffer)
     vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
     buffer.allocation = VK_NULL_HANDLE;
     buffer.buffer = VK_NULL_HANDLE;
+}
+
+VkCommandBuffer Context::allocate_and_begin_command_buffer()
+{
+    VkCommandBufferAllocateInfo info{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    info.commandPool = transfer_command_pool;
+    info.commandBufferCount = 1;
+    info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateCommandBuffers(device, &info, &cmd));
+
+    VkCommandBufferBeginInfo begin_info{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &begin_info));
+
+    return cmd;
+}
+
+void Context::end_command_buffer_submit_and_free(VkCommandBuffer cmd)
+{
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo info{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    info.commandBufferCount = 1;
+    info.pCommandBuffers = &cmd;
+
+    VK_CHECK(vkQueueSubmit(graphics_queue, 1, &info, VK_NULL_HANDLE));
+
+    VK_CHECK(vkQueueWaitIdle(graphics_queue));
+
+    vkFreeCommandBuffers(device, transfer_command_pool, 1, &cmd);
 }
 
 VkDeviceAddress Context::buffer_device_address(const Buffer& buffer)

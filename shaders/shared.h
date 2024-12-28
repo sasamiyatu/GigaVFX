@@ -122,6 +122,17 @@ struct DrawIndirectCommand
     uint firstInstance;
 };
 
+// Matches VkAabbPositionsKHR 
+struct AABBPositions
+{
+    float min_x;
+    float min_y;
+    float min_z;
+    float max_x;
+    float max_y;
+    float max_z;
+};
+
 struct GPUParticleIndirectData
 {
     DispatchIndirectCommand dispatch_cmd;

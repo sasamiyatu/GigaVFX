@@ -73,5 +73,8 @@ struct Context
     Buffer create_buffer(const BufferDesc& desc, size_t alignment = 0);
     void destroy_buffer(Buffer& buffer);
 
+    VkCommandBuffer allocate_and_begin_command_buffer();
+    void end_command_buffer_submit_and_free(VkCommandBuffer cmd);
+
     VkDeviceAddress buffer_device_address(const Buffer& buffer);
 };

@@ -31,6 +31,7 @@
 #include "gpu_particles.h"
 #include "radix_sort.h"
 #include "camera.h"
+#include "vk_helpers.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
@@ -317,6 +318,64 @@ int main(int argc, char** argv)
     std::vector<MeshInstance> mesh_draws;
 
     test_radix_sort(&ctx);
+
+    // Test acceleration structure
+    ComputePipelineBuilder builder(ctx.device, true);
+    builder.set_shader_filepath("test_acceleration_structure.hlsl", "test_acceleration_structure");
+    ComputePipelineAsset* test_pipeline = new ComputePipelineAsset(builder);
+    AssetCatalog::register_asset(test_pipeline);
+
+    AccelerationStructure tlas;
+    { // Create acceleration structure
+        VkAccelerationStructureGeometryKHR geometries{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+        geometries.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+        geometries.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+        VkAccelerationStructureBuildGeometryInfoKHR build_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+        build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        build_info.geometryCount = 1;
+        build_info.pGeometries = &geometries;
+        uint32_t max_primitive_counts = 1;
+        VkAccelerationStructureBuildSizesInfoKHR size_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+        vkGetAccelerationStructureBuildSizesKHR(ctx.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &max_primitive_counts, &size_info);
+
+        { // AS buffer
+            BufferDesc{};
+            desc.size = size_info.accelerationStructureSize;
+            desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+            tlas.acceleration_structure_buffer = ctx.create_buffer(desc);
+        }
+
+        { // Scratch
+            BufferDesc{};
+            desc.size = size_info.buildScratchSize;
+            desc.usage_flags = VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+            tlas.scratch_buffer = ctx.create_buffer(desc);
+        }
+
+        VkAccelerationStructureCreateInfoKHR create_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+        create_info.buffer = tlas.acceleration_structure_buffer.buffer;
+        create_info.size = size_info.accelerationStructureSize;
+        create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        VK_CHECK(vkCreateAccelerationStructureKHR(ctx.device, &create_info, nullptr, &tlas.acceleration_structure));
+    }
+
+
+
+    Buffer instances_buffer;
+    {
+        VkAccelerationStructureInstanceKHR instance{};
+        instance.transform.matrix[0][0] = 1.0f;
+        instance.transform.matrix[1][1] = 1.0f;
+        instance.transform.matrix[2][2] = 1.0f;
+        instance.mask = 0xFF;
+        instance.accelerationStructureReference = VkHelpers::get_acceleration_structure_device_address(ctx.device, gpu_particle_system.blas.acceleration_structure);
+        BufferDesc desc{};
+        desc.size = sizeof(instance);
+        desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+        desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        desc.data = &instance;
+        instances_buffer = ctx.create_buffer(desc);
+    }
 
     bool running = true;
     bool texture_catalog_open = true;
@@ -665,6 +724,39 @@ int main(int argc, char** argv)
         // Where is the correct spot for this?
         gpu_particle_system.simulate(command_buffer, (float)delta_time, camera);
 
+        { // Build TLAS
+            VkAccelerationStructureGeometryKHR geometries{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+            geometries.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+            geometries.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+            geometries.geometry.instances.data.deviceAddress = VkHelpers::get_buffer_device_address(ctx.device, instances_buffer.buffer);
+            
+            VkAccelerationStructureBuildGeometryInfoKHR build_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+
+            build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+            build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+            build_info.dstAccelerationStructure = tlas.acceleration_structure;
+            build_info.geometryCount = 1;
+            build_info.pGeometries = &geometries;
+            build_info.scratchData.deviceAddress = VkHelpers::get_buffer_device_address(ctx.device, tlas.scratch_buffer.buffer);
+
+            VkAccelerationStructureBuildRangeInfoKHR ri{};
+            ri.primitiveCount = 1;
+            
+            VkAccelerationStructureBuildRangeInfoKHR* range_info = &ri;
+
+            vkCmdBuildAccelerationStructuresKHR(command_buffer, 1, &build_info, &range_info);
+
+            VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+            memory_barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+            memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(command_buffer,
+                VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                0,
+                1, &memory_barrier,
+                0, nullptr,
+                0, nullptr);
+        }
+
         { // Forward pass
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             color_info.imageView = hdr_render_target.view;
@@ -739,6 +831,19 @@ int main(int argc, char** argv)
 
         vkCmdEndRendering(command_buffer);
 
+#if 1 
+        DescriptorInfo desc_info[] = {
+            DescriptorInfo(tlas.acceleration_structure),
+            DescriptorInfo(globals_buffer.buffer),
+            DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
+            DescriptorInfo(gpu_particle_system.particle_aabbs.buffer),
+        };
+
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, test_pipeline->pipeline.pipeline);
+        vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, test_pipeline->pipeline.descriptor_update_template, test_pipeline->pipeline.layout, 0, desc_info);
+        vkCmdDispatch(command_buffer, (WINDOW_WIDTH + 7) / 8, (WINDOW_HEIGHT + 7) / 8, 1);
+#endif
+
         {
             DescriptorInfo descriptor_info[] = {
                 DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
@@ -802,6 +907,10 @@ int main(int argc, char** argv)
     vkDestroyImageView(ctx.device, depth_texture.view, nullptr);
     hdr_render_target.destroy(ctx.device, ctx.allocator);
     texture_catalog.shutdown();
+    vkDestroyAccelerationStructureKHR(ctx.device, tlas.acceleration_structure, nullptr);
+    ctx.destroy_buffer(tlas.acceleration_structure_buffer);
+    ctx.destroy_buffer(tlas.scratch_buffer);
+    ctx.destroy_buffer(instances_buffer);
     for (auto& m : meshes)
     {
         vmaDestroyBuffer(ctx.allocator, m.indices.buffer, m.indices.allocation);
@@ -826,6 +935,7 @@ int main(int argc, char** argv)
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
     tonemap_pipeline->builder.destroy_resources(tonemap_pipeline->pipeline);
+    test_pipeline->builder.destroy_resources(test_pipeline->pipeline);
     particle_renderer.shutdown();
 
     ctx.shutdown();

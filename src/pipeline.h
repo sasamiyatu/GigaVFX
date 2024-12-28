@@ -16,6 +16,7 @@ struct DescriptorInfo
     {
         VkDescriptorImageInfo image_info;
         VkDescriptorBufferInfo buffer_info;
+        VkAccelerationStructureKHR acceleration_structure;
     };
 
     inline DescriptorInfo(VkSampler sampler)
@@ -37,6 +38,11 @@ struct DescriptorInfo
         image_info = {};
         image_info.imageView = image_view;
         image_info.imageLayout = layout;
+    }
+
+    inline DescriptorInfo(VkAccelerationStructureKHR as)
+    {
+        acceleration_structure = as;
     }
 };
 

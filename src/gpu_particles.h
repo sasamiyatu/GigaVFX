@@ -3,6 +3,13 @@
 #include "buffer.h"
 #include "radix_sort.h"
 
+struct AccelerationStructure
+{
+    VkAccelerationStructureKHR acceleration_structure;
+    Buffer acceleration_structure_buffer;
+    Buffer scratch_buffer;
+};
+
 struct GPUParticleSystem
 {
     void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity);
@@ -35,14 +42,18 @@ struct GPUParticleSystem
     struct ComputePipelineAsset* particle_compact_pipeline = nullptr;
     struct ComputePipelineAsset* particle_debug_sort_pipeline = nullptr;
     uint32_t particle_capacity = 0;
-    float particle_spawn_rate = 1.0f;
+    float particle_spawn_rate = 10000.0f;
     float particles_to_spawn = 0.0f;
     bool particles_initialized = false;
     float particle_size = 0.1f; // World space
     glm::vec4 particle_color = glm::vec4(1.0f);
     glm::vec3 particle_sort_axis = glm::vec3(1.0f, 0.0f, 0.0f);
+    bool sort_particles = true;
 
     RadixSortContext* sort_context = nullptr;
+
+    AccelerationStructure blas = {};
+    Buffer particle_aabbs = {}; // Acceleration structure input
 
     struct
     {

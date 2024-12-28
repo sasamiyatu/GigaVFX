@@ -5,6 +5,7 @@
 #include "../shaders/shared.h"
 #include "imgui/imgui.h"
 #include "camera.h"
+#include "vk_helpers.h"
 
 static uint32_t get_dispatch_size(uint32_t particle_capacity)
 {
@@ -144,6 +145,52 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		desc.size = memory_requirements.indirect_size;
 		sort_indirect_buffer = ctx->create_buffer(desc, memory_requirements.indirect_alignment);
 	}
+
+	{ // Create accelerations structure
+		VkAccelerationStructureGeometryKHR blas_geometry{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+		blas_geometry.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+		blas_geometry.geometry.aabbs = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR };
+
+		VkAccelerationStructureBuildGeometryInfoKHR build_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+		build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+		build_info.geometryCount = 1;
+		build_info.pGeometries = &blas_geometry;
+
+		uint32_t max_primitive_counts = particle_capacity;
+
+		VkAccelerationStructureBuildSizesInfoKHR size_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+		vkGetAccelerationStructureBuildSizesKHR(ctx->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+			&build_info,
+			&max_primitive_counts,
+			&size_info);
+
+		{ // Acceleration structure buffer
+			BufferDesc desc{};
+			desc.size = size_info.accelerationStructureSize;
+			desc.usage_flags = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+			blas.acceleration_structure_buffer = ctx->create_buffer(desc);
+		}
+
+		{ // Scratch buffer
+			BufferDesc desc{};
+			desc.size = size_info.buildScratchSize;
+			desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+			blas.scratch_buffer = ctx->create_buffer(desc);
+		}
+
+		VkAccelerationStructureCreateInfoKHR create_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+		create_info.buffer = blas.acceleration_structure_buffer.buffer;
+		create_info.size = size_info.accelerationStructureSize;
+		create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+		VK_CHECK(vkCreateAccelerationStructureKHR(ctx->device, &create_info, nullptr, &blas.acceleration_structure));
+
+		{ // Acceleration structure input
+			BufferDesc desc{};
+			desc.size = sizeof(AABBPositions) * particle_capacity;
+			desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+			particle_aabbs = ctx->create_buffer(desc);
+		}
+	}
 }
 
 void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& camera_state)
@@ -202,6 +249,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		DescriptorInfo(particle_system_state[1].buffer),
 		DescriptorInfo(indirect_dispatch_buffer.buffer),
 		DescriptorInfo(sort_keyval_buffer[0].buffer),
+		DescriptorInfo(particle_aabbs.buffer),
 	};
 
 	// Likewise for push constants
@@ -215,6 +263,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
 		vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, particle_aabbs.buffer, 0, VK_WHOLE_SIZE, 0);
 
 		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -300,26 +349,66 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	}
 
 	{ // Sort particles
-		radix_sort_vk_sort_indirect_info sort_info{};
-		sort_info.key_bits = 32;
-		uint32_t count_offset = offsetof(GPUParticleIndirectData, draw_cmd) + offsetof(DrawIndirectCommand, instanceCount);
-		sort_info.count = { indirect_dispatch_buffer.buffer, count_offset, VK_WHOLE_SIZE };
-		sort_info.keyvals_even = { sort_keyval_buffer[0].buffer, 0, VK_WHOLE_SIZE};
-		sort_info.keyvals_odd = { sort_keyval_buffer[1].buffer, 0, VK_WHOLE_SIZE};
-		sort_info.internal = { sort_internal_buffer.buffer, 0, VK_WHOLE_SIZE };
-		sort_info.indirect = { sort_indirect_buffer.buffer, 0, VK_WHOLE_SIZE };
+		if (sort_particles)
+		{
+			radix_sort_vk_sort_indirect_info sort_info{};
+			sort_info.key_bits = 32;
+			uint32_t count_offset = offsetof(GPUParticleIndirectData, draw_cmd) + offsetof(DrawIndirectCommand, instanceCount);
+			sort_info.count = { indirect_dispatch_buffer.buffer, count_offset, VK_WHOLE_SIZE };
+			sort_info.keyvals_even = { sort_keyval_buffer[0].buffer, 0, VK_WHOLE_SIZE };
+			sort_info.keyvals_odd = { sort_keyval_buffer[1].buffer, 0, VK_WHOLE_SIZE };
+			sort_info.internal = { sort_internal_buffer.buffer, 0, VK_WHOLE_SIZE };
+			sort_info.indirect = { sort_indirect_buffer.buffer, 0, VK_WHOLE_SIZE };
 
-		VkDescriptorBufferInfo keyvals_sorted{};
-		radix_sort_vk_sort_indirect(ctx->radix_sort_instance, &sort_info, ctx->device, cmd, &keyvals_sorted);
+			VkDescriptorBufferInfo keyvals_sorted{};
+			radix_sort_vk_sort_indirect(ctx->radix_sort_instance, &sort_info, ctx->device, cmd, &keyvals_sorted);
 
-		if (keyvals_sorted.buffer != sort_keyval_buffer[0].buffer) 
-			std::swap(sort_keyval_buffer[0], sort_keyval_buffer[1]);
+			if (keyvals_sorted.buffer != sort_keyval_buffer[0].buffer)
+				std::swap(sort_keyval_buffer[0], sort_keyval_buffer[1]);
+		}
 
 		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 		vkCmdPipelineBarrier(cmd,
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+			0,
+			1, &memory_barrier,
+			0, nullptr,
+			0, nullptr);
+	}
+
+	{ // Build acceleration structure
+
+		VkAccelerationStructureGeometryKHR blas_geometry{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+		blas_geometry.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+		blas_geometry.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+		blas_geometry.geometry.aabbs.data.deviceAddress = VkHelpers::get_buffer_device_address(ctx->device, particle_aabbs.buffer);
+		blas_geometry.geometry.aabbs.stride = sizeof(AABBPositions);
+
+		VkAccelerationStructureBuildGeometryInfoKHR build_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+
+		build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+		build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+		build_info.dstAccelerationStructure = blas.acceleration_structure;
+		build_info.geometryCount = 1;
+		build_info.pGeometries = &blas_geometry;
+		build_info.scratchData.deviceAddress = VkHelpers::get_buffer_device_address(ctx->device, blas.scratch_buffer.buffer);
+
+		VkAccelerationStructureBuildRangeInfoKHR build_range_info{};
+		build_range_info.primitiveCount = particle_capacity;
+		build_range_info.primitiveOffset = 0;
+		build_range_info.firstVertex = 0;
+		build_range_info.transformOffset = 0;
+
+		VkAccelerationStructureBuildRangeInfoKHR* range_ptr = &build_range_info;
+		vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_info, &range_ptr);
+
+		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		memory_barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		vkCmdPipelineBarrier(cmd,
+			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
 			0,
 			1, &memory_barrier,
 			0, nullptr,
@@ -335,6 +424,8 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		vkCmdDispatch(cmd, 1, 1, 1);
 	}
 #endif
+
+
 
 	particles_to_spawn -= std::floor(particles_to_spawn);
 
@@ -389,6 +480,10 @@ void GPUParticleSystem::destroy()
 	ctx->destroy_buffer(indirect_dispatch_buffer);
 	ctx->destroy_buffer(sort_indirect_buffer);
 	ctx->destroy_buffer(sort_internal_buffer);
+	vkDestroyAccelerationStructureKHR(ctx->device, blas.acceleration_structure, nullptr);
+	ctx->destroy_buffer(blas.acceleration_structure_buffer);
+	ctx->destroy_buffer(blas.scratch_buffer);
+	ctx->destroy_buffer(particle_aabbs);
 	for (int i = 0; i < 2; ++i)
 	{
 		ctx->destroy_buffer(sort_keyval_buffer[i]);
@@ -409,4 +504,5 @@ void GPUParticleSystem::draw_ui()
 	ImGui::SliderFloat("particle size", &particle_size, 0.001f, 1.0f);
 	ImGui::SliderFloat("particle alpha", &particle_color.a, 0.01f, 1.0f);
 	ImGui::ColorEdit3("particle color", glm::value_ptr(particle_color));
+	ImGui::Checkbox("sort particles", &sort_particles);
 }

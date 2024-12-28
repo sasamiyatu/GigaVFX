@@ -22,6 +22,8 @@
 
 [[vk::binding(6)]] RWStructuredBuffer<GPUParticleIndirectData> indirect_dispatch;
 [[vk::binding(7)]] RWStructuredBuffer<GPUParticleSort> particle_sort;
+[[vk::binding(8)]] RWStructuredBuffer<AABBPositions> aabb_positions;
+
 
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
@@ -127,6 +129,16 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
         sort.key = sort_key_from_float(asuint(projected)); // TODO: Float sortkey to uint
         
         particle_sort[index] = sort;
+
+        AABBPositions aabb;
+        aabb.min_x = p.position.x - push_constants.particle_size * 0.5;
+        aabb.min_y = p.position.y - push_constants.particle_size * 0.5;
+        aabb.min_z = p.position.z - push_constants.particle_size * 0.5;
+        aabb.max_x = p.position.x + push_constants.particle_size * 0.5;
+        aabb.max_y = p.position.y + push_constants.particle_size * 0.5;
+        aabb.max_z = p.position.z + push_constants.particle_size * 0.5;
+
+        aabb_positions[index] = aabb;
     }
 }
 

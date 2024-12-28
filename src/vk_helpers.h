@@ -62,4 +62,18 @@ namespace VkHelpers
 			0, nullptr,
 			0, nullptr);
 	}
+
+	inline VkDeviceAddress get_buffer_device_address(VkDevice device, VkBuffer buffer)
+	{
+		VkBufferDeviceAddressInfo info{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+		info.buffer = buffer;
+		return vkGetBufferDeviceAddress(device, &info);
+	}
+
+	inline VkDeviceAddress  get_acceleration_structure_device_address(VkDevice device, VkAccelerationStructureKHR as)
+	{
+		VkAccelerationStructureDeviceAddressInfoKHR info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
+		info.accelerationStructure = as;
+		return vkGetAccelerationStructureDeviceAddressKHR(device, &info);
+	}
 }
