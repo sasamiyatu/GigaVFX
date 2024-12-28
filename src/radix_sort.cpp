@@ -3,6 +3,7 @@
 #include "buffer.h"
 #include "vk_helpers.h"
 #include <algorithm>
+#include <random>
 
 struct RadixSortContext
 {
@@ -13,10 +14,33 @@ struct RadixSortContext
     Buffer indirect_buffer;
 };
 
+struct Sort
+{
+    uint32_t index;
+    uint32_t key;
+};
+
+static inline uint32_t sort_key_from_float(uint32_t f)
+{
+    uint32_t mask = -int32_t(f >> 31) | 0x80000000;
+    return f ^ mask;
+}
+
 static void test_direct(Context* ctx)
 {
-    uint32_t test_data[] = { 8,   7,   3,   6,   9,   1,   4,   5,   2,  10, };
-    uint32_t count = (uint32_t)std::size(test_data);
+    constexpr uint32_t count = 100;
+    std::vector<float> float_data(count);
+    for (uint32_t i = 0; i < count; ++i)
+        float_data[i] = -50.0f + (float)i;
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(float_data.begin(), float_data.end(), g);
+
+    std::vector<Sort> test_data(count);
+    for (uint32_t i = 0; i < count; ++i)
+        test_data[i] = {i, sort_key_from_float((uint32_t&)(float_data[i]))};
+
 
     radix_sort_vk_memory_requirements memory_requirements{};
     radix_sort_vk_get_memory_requirements(ctx->radix_sort_instance, count, &memory_requirements);
@@ -38,7 +62,7 @@ static void test_direct(Context* ctx)
     {
         void* mapped;
         vmaMapMemory(ctx->allocator, keyvals_buffers[0].allocation, &mapped);
-        memcpy(mapped, test_data, sizeof(test_data));
+        memcpy(mapped, test_data.data(), test_data.size() * sizeof(test_data[0]));
         vmaUnmapMemory(ctx->allocator, keyvals_buffers[0].allocation);
     }
 
@@ -89,19 +113,25 @@ static void test_direct(Context* ctx)
         printf("vk-radix-sort direct test:\n");
         printf("Original: [ ");
         for (uint32_t i = 0; i < count; ++i)
-            printf("%d ", test_data[i]);
+            printf("%f ", float_data[i]);
         printf("]\n");
 
-        uint32_t* ptr = (uint32_t*)mapped;
+        Sort* ptr = (Sort*)mapped;
         printf("Sorted: [ ");
         for (uint32_t i = 0; i < count; ++i)
-            printf("%d ", *(ptr + i));
+            printf("%f ", float_data[(ptr + i)->index]);
         printf("]\n");
 
-        std::sort(std::begin(test_data), std::end(test_data));
+        std::sort(std::begin(test_data), std::end(test_data), [](const Sort& a, const Sort& b) {
+            return a.key < b.key;
+        });
+
+        std::vector<float> float_data_sorted = float_data;
+        std::sort(std::begin(float_data_sorted), std::end(float_data_sorted));
         for (uint32_t i = 0; i < count; ++i)
         {
-            assert(test_data[i] == *(ptr + i));
+            assert(test_data[i].key == (ptr + i)->key);
+            assert(float_data_sorted[i] == float_data[(ptr + i)->index]);
         }
 
         vmaUnmapMemory(ctx->allocator, out_buffer.allocation);
@@ -115,16 +145,24 @@ static void test_direct(Context* ctx)
 
 static void test_indirect(Context* ctx)
 {
-    uint32_t test_data[] = { 8,   7,   3,   6,   9,   1,   4,   5,   2,  10, };
+    std::vector<Sort> test_data(100);
+    for (uint32_t i = 0; i < 100; ++i)
+        test_data[i] = { i, i };
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(test_data.begin(), test_data.end(), g);
+    for (size_t i = 0; i < 100; ++i)
+        test_data[i].index = i;
     uint32_t count = (uint32_t)std::size(test_data);
 
     RadixSortContext* sort_ctx = radix_sort_context_create(ctx, count);
 
     BufferDesc desc{};
-    desc.size = sizeof(test_data);
+    desc.size = test_data.size() * sizeof(test_data[0]);
     desc.usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-    desc.data = test_data;
+    desc.data = test_data.data();
     Buffer staging = ctx->create_buffer(desc);
 
     desc.size = sizeof(uint32_t);
@@ -138,7 +176,7 @@ static void test_indirect(Context* ctx)
 
     VkBufferCopy buffer_copy{};
     buffer_copy.srcOffset = buffer_copy.dstOffset = 0;
-    buffer_copy.size = sizeof(test_data);
+    buffer_copy.size = test_data.size() * sizeof(test_data[0]);
     vkCmdCopyBuffer(cmd, staging.buffer, sort_ctx->even_buffer.buffer, 1, &buffer_copy);
 
     VkHelpers::full_barrier(cmd);
@@ -170,18 +208,20 @@ static void test_indirect(Context* ctx)
 
     printf("vk-radix-sort indirect test:\n");
     printf("Original: [ ");
-    for (uint32_t i = 0; i < count; ++i) printf("%d ", test_data[i]);
+    for (uint32_t i = 0; i < count; ++i) printf("%d ", test_data[i].key);
     printf(" ]\n");
 
-    std::sort(std::begin(test_data), std::end(test_data));
+    std::sort(std::begin(test_data), std::end(test_data), [](const Sort& a, const Sort& b) {
+        return a.key < b.key;
+        });
     printf("Sorted: [ ");
     void* mapped;
     vmaMapMemory(ctx->allocator, staging.allocation, &mapped);
-    uint32_t* ptr = (uint32_t*)mapped;
+    Sort* ptr = (Sort*)mapped;
     for (uint32_t i = 0; i < count; ++i)
     {
-        assert(test_data[i] == *(ptr + i));
-        printf("%d ", *(ptr + i));
+        assert(test_data[i].key == (ptr + i)->key);
+        printf("%d ", (ptr + i)->key);
     }
     printf(" ]\n");
 
@@ -242,39 +282,4 @@ void radix_sort_context_destroy(RadixSortContext* ctx)
 const Buffer& radix_sort_context_get_input(RadixSortContext* ctx)
 {
     return ctx->even_buffer;
-}
-
-void radix_sort_sort_indirect(RadixSortContext* ctx, uint32_t count, VkCommandBuffer cmd, const Buffer** output_buffer)
-{
-}
-
-void radix_sort_sort_direct(RadixSortContext* ctx, uint32_t count, VkCommandBuffer cmd, const Buffer** output_buffer)
-{
-    VkDescriptorBufferInfo keyvals_even{
-        ctx->even_buffer.buffer,
-        0,
-        VK_WHOLE_SIZE
-    };
-    VkDescriptorBufferInfo keyvals_odd{
-        ctx->odd_buffer.buffer,
-        0,
-        VK_WHOLE_SIZE
-    };
-    VkDescriptorBufferInfo internal{
-        ctx->internal_buffer.buffer,
-        0,
-        VK_WHOLE_SIZE
-    };
-    radix_sort_vk_sort_info_t sort_info{};
-    sort_info.key_bits = 32;
-    sort_info.count = count;
-    sort_info.keyvals_even = keyvals_even;
-    sort_info.keyvals_odd = keyvals_odd;
-    sort_info.internal = internal;
-
-    VkDescriptorBufferInfo keyvals_sorted{};
-    radix_sort_vk_sort(ctx->ctx->radix_sort_instance, &sort_info, ctx->ctx->device, cmd, &keyvals_sorted);
-    assert(keyvals_sorted.offset == 0);
-    assert(keyvals_sorted.range == VK_WHOLE_SIZE);
-    *output_buffer = keyvals_sorted.buffer == ctx->even_buffer.buffer ? &ctx->even_buffer : &ctx->odd_buffer;
 }

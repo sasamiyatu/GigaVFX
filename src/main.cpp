@@ -30,6 +30,7 @@
 #include "texture_catalog.h"    
 #include "gpu_particles.h"
 #include "radix_sort.h"
+#include "camera.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
@@ -41,17 +42,6 @@ constexpr uint32_t WINDOW_HEIGHT = 720;
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
 
 constexpr VkFormat RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
-
-struct CameraState
-{
-    glm::vec3 position = glm::vec3(0.0f);
-    glm::vec3 forward = glm::vec3(0.0f, 0.0f, -1.0f);
-    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
-
-    float fov = glm::radians(75.0f);
-    float znear = 0.1f;
-    float zfar = 100.0f;
-};
 
 Context ctx;
 
@@ -345,6 +335,7 @@ int main(int argc, char** argv)
             ImGui::Text("Frame time: %f ms", ctx.smoothed_frame_time_ns * 1e-6f);
             ImGui::Text("Particle simulate: %f us", gpu_particle_system.performance_timings.simulate_total * 1e-3f);
             ImGui::Text("Particle render: %f us", gpu_particle_system.performance_timings.render_total * 1e-3f);
+            gpu_particle_system.draw_ui();
             ImGui::End();
         }
 
@@ -672,7 +663,7 @@ int main(int argc, char** argv)
         }
 
         // Where is the correct spot for this?
-        gpu_particle_system.simulate(command_buffer, (float)delta_time);
+        gpu_particle_system.simulate(command_buffer, (float)delta_time, camera);
 
         { // Forward pass
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };

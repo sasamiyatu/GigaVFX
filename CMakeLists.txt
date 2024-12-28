@@ -62,6 +62,7 @@ cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
 
 add_executable(gigasticle
     src/buffer.h
+    src/camera.h
     src/cgltf.h
     src/defines.h
     src/gltf.h

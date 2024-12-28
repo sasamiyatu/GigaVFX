@@ -21,3 +21,9 @@ float rgb_to_luminance(float3 color)
 {
     return dot(color, float3(0.2126, 0.7152, 0.0722));
 }
+
+uint sort_key_from_float(uint f)
+{
+	uint mask = -int(f >> 31) | 0x80000000;
+	return f ^ mask;
+}

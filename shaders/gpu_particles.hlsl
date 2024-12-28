@@ -1,6 +1,8 @@
 #include "shared.h"
 #include "math.hlsli"
 #include "random.hlsli"
+#include "noise.hlsli"
+#include "misc.hlsli"
 
 [[vk::binding(0)]] cbuffer globals {
     ShaderGlobals globals;
@@ -19,6 +21,7 @@
 [[vk::binding(5)]] RWStructuredBuffer<GPUParticleSystemState> particle_system_state_out;
 
 [[vk::binding(6)]] RWStructuredBuffer<GPUParticleIndirectData> indirect_dispatch;
+[[vk::binding(7)]] RWStructuredBuffer<GPUParticleSort> particle_sort;
 
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
@@ -45,8 +48,9 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
     GPUParticle p;
     p.lifetime = 3.0;
-    p.velocity = point_on_sphere;
+    //p.velocity = point_on_sphere;
     p.position = float3(0, 1, 0) + point_on_sphere * 0.1;
+    p.velocity = curl_noise(p.position);
     particles[global_particle_index + local_index] = p;
 }
 
@@ -59,6 +63,8 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
+        p.velocity = curl_noise(p.position);
+        uint4 seed = uint4(globals.frame_index, asuint(p.position));
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
@@ -87,6 +93,7 @@ void cs_write_dispatch( uint3 thread_id : SV_DispatchThreadID )
     indirect_dispatch[0].draw_cmd = draw_cmd;
 }
 
+// TODO: Should probably be merged with simulate
 [numthreads(64, 1, 1)]
 void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
 {
@@ -110,7 +117,40 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
     global_particle_index = WaveReadLaneFirst(global_particle_index);
 
     if (alive)
-        particles_compact_out[global_particle_index + local_index] = p;
+    {
+        uint index = global_particle_index + local_index;
+        particles_compact_out[index] = p;
+
+        float projected = dot(push_constants.sort_axis, p.position);
+        GPUParticleSort sort;
+        sort.index = index;
+        sort.key = sort_key_from_float(asuint(projected)); // TODO: Float sortkey to uint
+        
+        particle_sort[index] = sort;
+    }
+}
+
+// Used for debugging only
+[numthreads(1, 1, 1)]
+void cs_debug_print_sorted_particles( uint3 thread_id : SV_DispatchThreadID )
+{
+    uint count = particle_system_state_out[0].active_particle_count;
+    printf("active count %d, sort_axis: (%f, %f, %f)\n", count, push_constants.sort_axis);
+
+    printf("Unsorted");
+    for (uint i = 0; i < count; ++i)
+    {
+        GPUParticle p = particles_compact_out[i];
+        float proj = dot(push_constants.sort_axis, p.position);
+        printf("%f", proj);
+    }
+    printf("Sorted");
+    for (uint i = 0; i < count; ++i)
+    {
+        GPUParticle p = particles_compact_out[particle_sort[i].index];
+        float proj = dot(push_constants.sort_axis, p.position);
+        printf("%f", proj);
+    }
 }
 
 struct VSInput
@@ -131,17 +171,18 @@ VSOutput vs_main(VSInput input)
 {
     VSOutput output = (VSOutput)0;
 
-    GPUParticle p = particles[input.instance_id];
+    uint particle_index = particle_sort[input.instance_id].index;
+    GPUParticle p = particles[particle_index];
     float4 pos = mul(system_globals.transform, float4(p.position, 1.0));
     float4 view_pos = mul(globals.view, pos);
     output.position = mul(globals.projection, view_pos);
     output.center_pos = output.position.xy / output.position.w;
 
-    const float particle_size = 0.1f;
+    const float particle_size = push_constants.particle_size;
     float4 corner = float4(particle_size * 0.5, particle_size * 0.5, view_pos.z, 1.0);
     float4 proj_corner = mul(globals.projection, corner);
     float point_size = globals.resolution.x * proj_corner.x / proj_corner.w;
-    output.point_size = p.lifetime > 0.0 ? point_size : 0.0f;
+    output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
     output.frag_point_size = output.point_size;
     return output;
 }
@@ -172,7 +213,8 @@ PSOutput fs_main(PSInput input)
     r /= (input.frag_point_size * 0.5);
     float alpha = 1.0 - smoothstep(0.0, 1.0, r);
 
-    output.color = float4(1.0, 0.6, 0.4, alpha);
+    float4 in_color = push_constants.particle_color;
+    output.color = in_color * float4(1, 1, 1, alpha);
 
     return output;
 }

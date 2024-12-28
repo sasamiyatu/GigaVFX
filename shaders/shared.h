@@ -94,6 +94,9 @@ struct GPUParticlePushConstants
 {
     float delta_time;
     uint particles_to_spawn;
+    float particle_size;
+    float4 particle_color;
+    float3 sort_axis;
 };
 
 struct GPUParticleSystemGlobals
@@ -138,3 +141,8 @@ struct GPUParticle
     float lifetime; // alive if > 0
 };
 
+struct GPUParticleSort
+{
+    uint index;
+    uint key;
+};

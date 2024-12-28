@@ -139,7 +139,8 @@ void Context::init(int window_width, int window_height)
     props2.pNext = &subgroup_props;
     vkGetPhysicalDeviceProperties2(physical_device, &props2);
 
-    radix_sort_vk_target_t* target = radix_sort_vk_target_auto_detect(&physical_device.properties, &subgroup_props, 1);
+    uint32_t keyval_dwords = 2;
+    radix_sort_vk_target_t* target = radix_sort_vk_target_auto_detect(&physical_device.properties, &subgroup_props, 2);
     radix_sort_vk_target_requirements_t requirements{};
     VkPhysicalDeviceFeatures radix_sort_required_feats{};
     VkPhysicalDeviceVulkan11Features radix_sort_required_vk_11_feats{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
