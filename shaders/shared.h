@@ -137,7 +137,7 @@ struct AABBPositions
 // Matches VkAccelerationStructureInstanceKHR
 struct AccelerationStructureInstance 
 {
-    float4x3 transform;
+    float matrix[3][4];
     uint instanceCustomIndex:24;
     uint mask:8;
     uint instanceShaderBindingTableRecordOffset:24;

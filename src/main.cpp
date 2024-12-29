@@ -746,9 +746,10 @@ int main(int argc, char** argv)
         //particle_system_manager.render(command_buffer);
         gpu_particle_system.render(command_buffer);
 
+
         vkCmdEndRendering(command_buffer);
 
-#if 1 
+#if 0
         DescriptorInfo desc_info[] = {
             DescriptorInfo(gpu_particle_system.tlas.acceleration_structure),
             DescriptorInfo(globals_buffer.buffer),

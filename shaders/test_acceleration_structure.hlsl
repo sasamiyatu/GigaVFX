@@ -65,9 +65,14 @@ void test_acceleration_structure( uint3 thread_id : SV_DispatchThreadID )
         {
             uint pi = q.CandidatePrimitiveIndex();
 
+#if 0
+            float3 center = float3(0, 0, 0);
+            float radius = 1.0;
+#else
             AABBPositions aabb = aabb_positions[pi];
             float3 center = float3(aabb.min_x + aabb.max_x, aabb.min_y + aabb.max_y, aabb.min_z + aabb.max_z) * 0.5;
             float radius = (aabb.max_x - aabb.min_x) * 0.5;
+#endif
             float3 ro = q.CandidateObjectRayOrigin();
             float3 rd = q.CandidateObjectRayDirection();
             float2 shit = sphere_intersect(ro, rd, center, radius);

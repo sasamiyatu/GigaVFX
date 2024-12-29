@@ -185,7 +185,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		VK_CHECK(vkCreateAccelerationStructureKHR(ctx->device, &create_info, nullptr, &blas.acceleration_structure));
 
 		{ // Acceleration structure input
-			BufferDesc desc{};
+			BufferDesc desc{};	
 			desc.size = sizeof(AABBPositions) * particle_capacity;
 			desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 			particle_aabbs = ctx->create_buffer(desc);
@@ -238,7 +238,10 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 				}
 				BufferDesc desc{};
 				desc.size = sizeof(VkAccelerationStructureInstanceKHR) * particle_capacity;
-				desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+				desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | 
+					VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+					VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 				desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 				desc.data = instances.data();
 				instances_buffer = ctx->create_buffer(desc);
@@ -321,6 +324,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
 		vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
 		vkCmdFillBuffer(cmd, particle_aabbs.buffer, 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, instances_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
 		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -435,7 +439,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 			0, nullptr);
 	}
 
-	{ // Build acceleration structure
+	{ // Build bottom level acceleration structure
 
 		VkAccelerationStructureGeometryKHR blas_geometry{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
 		blas_geometry.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
@@ -541,6 +545,9 @@ void GPUParticleSystem::render(VkCommandBuffer cmd)
 		DescriptorInfo(particle_system_state[1].buffer),
 		DescriptorInfo(indirect_dispatch_buffer.buffer),
 		DescriptorInfo(sort_keyval_buffer[0].buffer),
+		DescriptorInfo(particle_aabbs.buffer),
+		DescriptorInfo(instances_buffer.buffer),
+		DescriptorInfo(tlas.acceleration_structure)
 	};
 	vkCmdPushDescriptorSetWithTemplateKHR(cmd, render_pipeline->pipeline.descriptor_update_template, render_pipeline->pipeline.layout, 0, descriptor_info);
 

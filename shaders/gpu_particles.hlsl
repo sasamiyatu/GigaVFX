@@ -24,7 +24,7 @@
 [[vk::binding(7)]] RWStructuredBuffer<GPUParticleSort> particle_sort;
 [[vk::binding(8)]] RWStructuredBuffer<AABBPositions> aabb_positions;
 [[vk::binding(9)]] RWStructuredBuffer<AccelerationStructureInstance> instances;
-
+[[vk::binding(10)]] RaytracingAccelerationStructure acceleration_structure;
 
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
@@ -131,6 +131,45 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
         
         particle_sort[index] = sort;
 
+#if 0
+        if (index == 0)
+        {
+            AABBPositions aabb;
+            aabb.min_x = -1.0;
+            aabb.min_y = -1.0;
+            aabb.min_z = -1.0;
+            aabb.max_x = 1.0;
+            aabb.max_y = 1.0;
+            aabb.max_z = 1.0;
+
+            aabb_positions[index] = aabb;
+        }
+
+        AccelerationStructureInstance instance;
+        instance.matrix[0][0] = push_constants.particle_size * 0.5;
+        instance.matrix[1][1] = push_constants.particle_size * 0.5;
+        instance.matrix[2][2] = push_constants.particle_size * 0.5;
+        instance.matrix[0][3] = p.position.x;
+        instance.matrix[1][3] = p.position.y;
+        instance.matrix[2][3] = p.position.z;
+        instance.mask = 0xFF;
+        instance.accelerationStructureReference = push_constants.blas_address;
+        instances[index] = instance;
+#else
+        if (index == 0)
+        {
+            AccelerationStructureInstance instance;
+            instance.matrix[0][0] = 1.0;
+            instance.matrix[1][1] = 1.0;
+            instance.matrix[2][2] = 1.0;
+            instance.matrix[0][3] = 0.0;
+            instance.matrix[1][3] = 0.0;
+            instance.matrix[2][3] = 0.0;
+            instance.mask = 0xFF;
+            instance.accelerationStructureReference = push_constants.blas_address;
+            instances[index] = instance;
+        }
+
         AABBPositions aabb;
         aabb.min_x = p.position.x - push_constants.particle_size * 0.5;
         aabb.min_y = p.position.y - push_constants.particle_size * 0.5;
@@ -140,6 +179,7 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
         aabb.max_z = p.position.z + push_constants.particle_size * 0.5;
 
         aabb_positions[index] = aabb;
+#endif
 
         
     }
@@ -178,6 +218,7 @@ struct VSOutput
 {
     float4 position: SV_Position;
     float2 center_pos: POSITION0;
+    float3 world_pos: POSITION1;
     [[vk::builtin("PointSize")]] float point_size : PSIZE;
     float frag_point_size : TEXCOORD0;
 };
@@ -199,6 +240,7 @@ VSOutput vs_main(VSInput input)
     float point_size = globals.resolution.x * proj_corner.x / proj_corner.w;
     output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
     output.frag_point_size = output.point_size;
+    output.world_pos = pos.xyz;
     return output;
 }
 
@@ -206,6 +248,7 @@ struct PSInput
 {
     float4 position: SV_Position;
     float2 center_pos: POSITION0;
+    float3 world_pos: POSITION1;
     float frag_point_size : TEXCOORD0;
 };
 
@@ -228,7 +271,47 @@ PSOutput fs_main(PSInput input)
     r /= (input.frag_point_size * 0.5);
     float alpha = 1.0 - smoothstep(0.0, 1.0, r);
 
-    float4 in_color = push_constants.particle_color;
+    float3 L = normalize(globals.sun_direction.xyz);
+
+    RayDesc ray;
+    ray.Origin = input.world_pos;
+    ray.TMin = push_constants.particle_size;
+    ray.Direction = L;
+    ray.TMax = 1e38f;
+
+    RayQuery<RAY_FLAG_NONE> q;
+    q.TraceRayInline(acceleration_structure, 0, 0xFFFFFFFF, ray);
+
+    float transmittance = 1.0;
+#if 0
+    while(q.Proceed())
+    {
+        switch(q.CandidateType())
+        {
+        case CANDIDATE_PROCEDURAL_PRIMITIVE:
+        {
+            uint pi = q.CandidatePrimitiveIndex();
+
+            AABBPositions aabb = aabb_positions[pi];
+            float3 center = float3(aabb.min_x + aabb.max_x, aabb.min_y + aabb.max_y, aabb.min_z + aabb.max_z) * 0.5;
+            float radius = (aabb.max_x - aabb.min_x) * 0.5;
+
+            float t = distance(ray.Origin, center);
+            float3 X = ray.Origin + t * ray.Direction;
+
+            float xtop2 = dot(X - center, X - center);
+            float alpha = exp(-xtop2 / (radius * radius));
+
+            transmittance *= (1.0 - alpha);
+            break;
+        }
+        default:
+            break;
+        }
+    }
+#endif
+
+    float4 in_color = push_constants.particle_color * transmittance;
     output.color = in_color * float4(1, 1, 1, alpha);
 
     return output;
