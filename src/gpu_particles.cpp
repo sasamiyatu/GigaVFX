@@ -164,7 +164,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 			&max_primitive_counts,
 			&size_info);
 
-		{ // Acceleration structure buffer
+		{ // Acceleration bottom level structure buffer
 			BufferDesc desc{};
 			desc.size = size_info.accelerationStructureSize;
 			desc.usage_flags = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -190,6 +190,61 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 			desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 			particle_aabbs = ctx->create_buffer(desc);
 		}
+	}
+
+	{ // Acceleration top level structure buffer
+		{ // Create acceleration structure
+			VkAccelerationStructureGeometryKHR geometries{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+			geometries.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+			geometries.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+			VkAccelerationStructureBuildGeometryInfoKHR build_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+			build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+			build_info.geometryCount = 1;
+			build_info.pGeometries = &geometries;
+			uint32_t max_primitive_counts = particle_capacity;
+			VkAccelerationStructureBuildSizesInfoKHR size_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+			vkGetAccelerationStructureBuildSizesKHR(ctx->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &max_primitive_counts, &size_info);
+
+			{ // AS buffer
+				BufferDesc desc{};
+				desc.size = size_info.accelerationStructureSize;
+				desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+				tlas.acceleration_structure_buffer = ctx->create_buffer(desc);
+			}
+
+			{ // Scratch
+				BufferDesc desc{};
+				desc.size = size_info.buildScratchSize;
+				desc.usage_flags = VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+				tlas.scratch_buffer = ctx->create_buffer(desc);
+			}
+
+			VkAccelerationStructureCreateInfoKHR create_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+			create_info.buffer = tlas.acceleration_structure_buffer.buffer;
+			create_info.size = size_info.accelerationStructureSize;
+			create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+			VK_CHECK(vkCreateAccelerationStructureKHR(ctx->device, &create_info, nullptr, &tlas.acceleration_structure));
+
+			{ // Instances buffer
+				std::vector<VkAccelerationStructureInstanceKHR> instances(particle_capacity);
+				VkDeviceAddress blas_ref = VkHelpers::get_acceleration_structure_device_address(ctx->device, blas.acceleration_structure);
+				for (auto& i : instances)
+				{
+					i.mask = 0xFF;
+					i.transform.matrix[0][0] = 1.0f;
+					i.transform.matrix[1][1] = 1.0f;
+					i.transform.matrix[2][2] = 1.0f;
+					i.accelerationStructureReference = blas_ref;
+				}
+				BufferDesc desc{};
+				desc.size = sizeof(VkAccelerationStructureInstanceKHR) * particle_capacity;
+				desc.usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+				desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+				desc.data = instances.data();
+				instances_buffer = ctx->create_buffer(desc);
+			}
+		}
+
 	}
 }
 
@@ -250,6 +305,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		DescriptorInfo(indirect_dispatch_buffer.buffer),
 		DescriptorInfo(sort_keyval_buffer[0].buffer),
 		DescriptorInfo(particle_aabbs.buffer),
+		DescriptorInfo(instances_buffer.buffer),
 	};
 
 	// Likewise for push constants
@@ -259,6 +315,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.particle_size = particle_size;
 	push_constants.particle_color = particle_color;
 	push_constants.sort_axis = particle_sort_axis;
+	push_constants.blas_address = VkHelpers::get_acceleration_structure_device_address(ctx->device, blas.acceleration_structure);
 	
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
@@ -415,6 +472,40 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 			0, nullptr);
 	}
 
+
+	{ // Build TLAS
+		VkAccelerationStructureGeometryKHR geometries{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+		geometries.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+		geometries.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+		geometries.geometry.instances.data.deviceAddress = VkHelpers::get_buffer_device_address(ctx->device, instances_buffer.buffer);
+
+		VkAccelerationStructureBuildGeometryInfoKHR build_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+
+		build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+		build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+		build_info.dstAccelerationStructure = tlas.acceleration_structure;
+		build_info.geometryCount = 1;
+		build_info.pGeometries = &geometries;
+		build_info.scratchData.deviceAddress = VkHelpers::get_buffer_device_address(ctx->device, tlas.scratch_buffer.buffer);
+
+		VkAccelerationStructureBuildRangeInfoKHR ri{};
+		ri.primitiveCount = 1;
+
+		VkAccelerationStructureBuildRangeInfoKHR* range_info = &ri;
+
+		vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_info, &range_info);
+
+		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		memory_barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		vkCmdPipelineBarrier(cmd,
+			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+			0,
+			1, &memory_barrier,
+			0, nullptr,
+			0, nullptr);
+	}
+
 #if 0
 	{ // Debug sort
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_debug_sort_pipeline->pipeline.pipeline);
@@ -469,6 +560,10 @@ void GPUParticleSystem::destroy()
 		radix_sort_context_destroy(sort_context); 
 		sort_context = nullptr;
 	}
+	vkDestroyAccelerationStructureKHR(ctx->device, tlas.acceleration_structure, nullptr);
+	ctx->destroy_buffer(tlas.acceleration_structure_buffer);
+	ctx->destroy_buffer(tlas.scratch_buffer);
+	ctx->destroy_buffer(instances_buffer);
 	render_pipeline->builder.destroy_resources(render_pipeline->pipeline);
 	particle_emit_pipeline->builder.destroy_resources(particle_emit_pipeline->pipeline);
 	particle_dispatch_size_pipeline->builder.destroy_resources(particle_dispatch_size_pipeline->pipeline);

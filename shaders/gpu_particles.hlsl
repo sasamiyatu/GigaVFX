@@ -23,6 +23,7 @@
 [[vk::binding(6)]] RWStructuredBuffer<GPUParticleIndirectData> indirect_dispatch;
 [[vk::binding(7)]] RWStructuredBuffer<GPUParticleSort> particle_sort;
 [[vk::binding(8)]] RWStructuredBuffer<AABBPositions> aabb_positions;
+[[vk::binding(9)]] RWStructuredBuffer<AccelerationStructureInstance> instances;
 
 
 [[vk::push_constant]]
@@ -139,6 +140,8 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
         aabb.max_z = p.position.z + push_constants.particle_size * 0.5;
 
         aabb_positions[index] = aabb;
+
+        
     }
 }
 

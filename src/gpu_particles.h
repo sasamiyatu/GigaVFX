@@ -54,6 +54,8 @@ struct GPUParticleSystem
 
     AccelerationStructure blas = {};
     Buffer particle_aabbs = {}; // Acceleration structure input
+    AccelerationStructure tlas = {};
+    Buffer instances_buffer = {};
 
     struct
     {

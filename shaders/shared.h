@@ -97,6 +97,7 @@ struct GPUParticlePushConstants
     float particle_size;
     float4 particle_color;
     float3 sort_axis;
+    uint64_t blas_address;
 };
 
 struct GPUParticleSystemGlobals
@@ -131,6 +132,17 @@ struct AABBPositions
     float max_x;
     float max_y;
     float max_z;
+};
+
+// Matches VkAccelerationStructureInstanceKHR
+struct AccelerationStructureInstance 
+{
+    float4x3 transform;
+    uint instanceCustomIndex:24;
+    uint mask:8;
+    uint instanceShaderBindingTableRecordOffset:24;
+    uint flags:8;
+    uint64_t accelerationStructureReference;
 };
 
 struct GPUParticleIndirectData
