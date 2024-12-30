@@ -20,11 +20,14 @@
 [[vk::binding(4)]] RWStructuredBuffer<GPUParticle> particles_compact_out;
 [[vk::binding(5)]] RWStructuredBuffer<GPUParticleSystemState> particle_system_state_out;
 
-[[vk::binding(6)]] RWStructuredBuffer<GPUParticleIndirectData> indirect_dispatch;
+[[vk::binding(6)]] RWStructuredBuffer<DispatchIndirectCommand> indirect_dispatch;
 [[vk::binding(7)]] RWStructuredBuffer<GPUParticleSort> particle_sort;
 [[vk::binding(8)]] RWStructuredBuffer<AABBPositions> aabb_positions;
 [[vk::binding(9)]] RWStructuredBuffer<AccelerationStructureInstance> instances;
 [[vk::binding(10)]] RaytracingAccelerationStructure acceleration_structure;
+[[vk::binding(11)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
+[[vk::binding(12)]] SamplerState light_sampler;
+[[vk::binding(13)]] Texture2D light_texture;
 
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
@@ -86,14 +89,35 @@ void cs_write_dispatch( uint3 thread_id : SV_DispatchThreadID )
     command.y = 1;
     command.z = 1;
 
+    indirect_dispatch[0] = command;
+}
+
+[numthreads(64, 1, 1)]
+void cs_write_draw( uint3 thread_id : SV_DispatchThreadID )
+{
+    if (thread_id.x >= push_constants.num_slices) return;
+
+    uint active_particles = particle_system_state_out[0].active_particle_count;
+    uint draw_count = push_constants.num_slices == 0 
+        ? active_particles
+        : (active_particles + push_constants.num_slices - 1) / push_constants.num_slices;
+
+    if (thread_id.x == 0)
+    {
+        printf("particle count: %d, draw count: %d, slices: %d", 
+            active_particles,
+            draw_count,
+            push_constants.num_slices
+        );
+    }
+
     DrawIndirectCommand draw_cmd;
     draw_cmd.vertexCount = 1;
-    draw_cmd.instanceCount = particle_system_state[0].active_particle_count;
+    draw_cmd.instanceCount = draw_count;
     draw_cmd.firstVertex = 0;
-    draw_cmd.firstInstance = 0;
+    draw_cmd.firstInstance = draw_count * thread_id.x;
 
-    indirect_dispatch[0].dispatch_cmd = command;
-    indirect_dispatch[0].draw_cmd = draw_cmd;
+    indirect_draw[thread_id.x] = draw_cmd;
 }
 
 // TODO: Should probably be merged with simulate
@@ -219,6 +243,7 @@ struct VSOutput
     float4 position: SV_Position;
     float2 center_pos: POSITION0;
     float3 world_pos: POSITION1;
+    int out_instance_id: TEXCOORD1;
     [[vk::builtin("PointSize")]] float point_size : PSIZE;
     float frag_point_size : TEXCOORD0;
 };
@@ -244,11 +269,37 @@ VSOutput vs_main(VSInput input)
     return output;
 }
 
+VSOutput vs_light(VSInput input)
+{
+    VSOutput output = (VSOutput)0;
+
+    uint particle_index = particle_sort[input.instance_id].index;
+    GPUParticle p = particles[particle_index];
+    float4 pos = mul(system_globals.transform, float4(p.position, 1.0));
+    float4 view_pos = mul(system_globals.light_view, pos);
+    output.position = mul(system_globals.light_proj, view_pos);
+    output.center_pos = output.position.xy / output.position.w;
+    //printf("id: %d", input.instance_id);
+    // if (input.instance_id == 0)
+    //     printf("center vs: %f  %f", output.center_pos.x, output.center_pos.y);
+    const float particle_size = push_constants.particle_size;
+    float4 corner = float4(particle_size * 0.5, particle_size * 0.5, view_pos.z, 1.0);
+    float4 proj_corner = mul(system_globals.light_proj, corner);
+    float point_size = system_globals.light_resolution.x * proj_corner.x / proj_corner.w;
+    //float point_size = 10.0f;
+    output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
+    output.frag_point_size = output.point_size;
+    output.world_pos = pos.xyz;
+    output.out_instance_id = input.instance_id;
+    return output;
+}
+
 struct PSInput
 {
     float4 position: SV_Position;
     float2 center_pos: POSITION0;
     float3 world_pos: POSITION1;
+    int out_instance_id: TEXCOORD1;
     float frag_point_size : TEXCOORD0;
 };
 
@@ -257,7 +308,32 @@ struct PSOutput
     float4 color: SV_Target0;
 };
 
-PSOutput fs_main(PSInput input)
+PSOutput particle_fs_light(PSInput input)
+{
+    PSOutput output = (PSOutput)0;
+
+    float2 center_pos = (input.center_pos * 0.5 + 0.5) * system_globals.light_resolution;
+    //center_pos.y = system_globals.light_resolution.y - center_pos.y;
+#if 0
+    if (input.out_instance_id == 0)
+        printf("lr: %u %u, input pos: %f %f, in_center: %f %f, center_pos: %f %f, point size: %f", 
+            system_globals.light_resolution.x, system_globals.light_resolution.y,
+            input.position.x, input.position.y, 
+            input.center_pos.x, input.center_pos.y,
+            center_pos.x, center_pos.y, input.frag_point_size);
+#endif
+    float r = distance(center_pos, input.position.xy);
+    r /= (input.frag_point_size * 0.5);
+    float alpha = 1.0 - smoothstep(0.0, 1.0, r);
+    //alpha = 1.0;
+
+    float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
+    output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
+
+    return output;
+}
+
+PSOutput particle_fs_shadowed(PSInput input)
 {
     PSOutput output = (PSOutput)0;
 
@@ -271,48 +347,8 @@ PSOutput fs_main(PSInput input)
     r /= (input.frag_point_size * 0.5);
     float alpha = 1.0 - smoothstep(0.0, 1.0, r);
 
-    float3 L = normalize(globals.sun_direction.xyz);
-
-    RayDesc ray;
-    ray.Origin = input.world_pos;
-    ray.TMin = push_constants.particle_size;
-    ray.Direction = L;
-    ray.TMax = 1e38f;
-
-    RayQuery<RAY_FLAG_NONE> q;
-    q.TraceRayInline(acceleration_structure, 0, 0xFFFFFFFF, ray);
-
-    float transmittance = 1.0;
-#if 0
-    while(q.Proceed())
-    {
-        switch(q.CandidateType())
-        {
-        case CANDIDATE_PROCEDURAL_PRIMITIVE:
-        {
-            uint pi = q.CandidatePrimitiveIndex();
-
-            AABBPositions aabb = aabb_positions[pi];
-            float3 center = float3(aabb.min_x + aabb.max_x, aabb.min_y + aabb.max_y, aabb.min_z + aabb.max_z) * 0.5;
-            float radius = (aabb.max_x - aabb.min_x) * 0.5;
-
-            float t = distance(ray.Origin, center);
-            float3 X = ray.Origin + t * ray.Direction;
-
-            float xtop2 = dot(X - center, X - center);
-            float alpha = exp(-xtop2 / (radius * radius));
-
-            transmittance *= (1.0 - alpha);
-            break;
-        }
-        default:
-            break;
-        }
-    }
-#endif
-
-    float4 in_color = push_constants.particle_color * transmittance;
-    output.color = in_color * float4(1, 1, 1, alpha);
+    float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
+    output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
 
     return output;
 }

@@ -12,6 +12,7 @@ struct Context
 {
     static constexpr uint32_t frames_in_flight = 2;
     SDL_Window* window;
+    int window_width, window_height;
     vkb::Instance instance;
     VkSurfaceKHR surface;
     vkb::PhysicalDevice physical_device;

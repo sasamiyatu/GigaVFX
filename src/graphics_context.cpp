@@ -18,6 +18,7 @@ void Context::init(int window_width, int window_height)
     SDL_Init(SDL_INIT_VIDEO);
 
     window = SDL_CreateWindow("Gigasticle", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_VULKAN);
+    SDL_GetWindowSize(window, &this->window_width, &this->window_height);
 
     VK_CHECK(volkInitialize());
 
@@ -29,8 +30,8 @@ void Context::init(int window_width, int window_height)
     instance_builder.add_validation_feature_enable(VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT);
     instance_builder.enable_extensions({
         VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME
-        });
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+    });
     instance_builder.set_debug_messenger_severity(
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
         | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT

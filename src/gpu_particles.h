@@ -13,8 +13,8 @@ struct AccelerationStructure
 struct GPUParticleSystem
 {
     void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity);
-    void simulate(VkCommandBuffer cmd, float dt, struct CameraState& camera_state);
-    void render(VkCommandBuffer cmd);
+    void simulate(VkCommandBuffer cmd, float dt, struct CameraState& camera_state, glm::vec3 light_dir);
+    void render(VkCommandBuffer cmd, const Texture& render_target, const Texture& depth_target);
     void destroy();
     void draw_stats_overlay();
     void draw_ui(); // Draws into the currently active imgui window
@@ -28,6 +28,7 @@ struct GPUParticleSystem
     Buffer particle_system_state[2] = {};
 
     Buffer indirect_dispatch_buffer = {};
+    Buffer indirect_draw_buffer = {};
 
     Buffer sort_keyval_buffer[2] = {}; // Radix sort uses two buffers internally
     Buffer sort_internal_buffer = {};
@@ -35,12 +36,16 @@ struct GPUParticleSystem
 
     VkQueryPool query_pool = VK_NULL_HANDLE;
 
-    struct GraphicsPipelineAsset* render_pipeline = nullptr;
+    struct GraphicsPipelineAsset* render_pipeline_back_to_front = nullptr;
+    struct GraphicsPipelineAsset* render_pipeline_front_to_back = nullptr;
+    struct GraphicsPipelineAsset* render_pipeline_light = nullptr;
     struct ComputePipelineAsset* particle_emit_pipeline = nullptr;
     struct ComputePipelineAsset* particle_dispatch_size_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_draw_count_pipeline = nullptr;
     struct ComputePipelineAsset* particle_simulate_pipeline = nullptr;
     struct ComputePipelineAsset* particle_compact_pipeline = nullptr;
     struct ComputePipelineAsset* particle_debug_sort_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_composite_pipeline = nullptr;
     uint32_t particle_capacity = 0;
     float particle_spawn_rate = 10000.0f;
     float particles_to_spawn = 0.0f;
@@ -49,6 +54,15 @@ struct GPUParticleSystem
     glm::vec4 particle_color = glm::vec4(1.0f);
     glm::vec3 particle_sort_axis = glm::vec3(1.0f, 0.0f, 0.0f);
     bool sort_particles = true;
+    uint32_t num_slices = 64;
+    int slices_to_display = 64;
+    bool display_single_slice = false;
+    float shadow_alpha = 1.0f;
+    bool draw_order_flipped = false;
+
+    Texture particle_render_target;
+    Texture light_render_target;
+    VkSampler light_sampler;
 
     RadixSortContext* sort_context = nullptr;
 

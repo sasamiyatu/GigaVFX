@@ -128,17 +128,17 @@ void add_shader_stage(GraphicsPipelineBuilder& builder, VkShaderStageFlagBits sh
     builder.pipeline_create_info.stageCount++;
 }
 
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_shader_filepath(const char* filepath)
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_shader_filepath(const char* filepath, const char* entry_point)
 {
     shader_sources[pipeline_create_info.stageCount].filepath = filepath;
-    add_shader_stage(*this, VK_SHADER_STAGE_VERTEX_BIT, "vs_main");
+    add_shader_stage(*this, VK_SHADER_STAGE_VERTEX_BIT, entry_point);
     return *this;
 }
 
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_fragment_shader_filepath(const char* filepath)
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_fragment_shader_filepath(const char* filepath, const char* entry_point)
 {
     shader_sources[pipeline_create_info.stageCount].filepath = filepath;
-    add_shader_stage(*this, VK_SHADER_STAGE_FRAGMENT_BIT, "fs_main");
+    add_shader_stage(*this, VK_SHADER_STAGE_FRAGMENT_BIT, entry_point);
     return *this;
 }
 
@@ -192,6 +192,12 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_blend_preset(BlendPreset p
     return *this;
 }
 
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_blend_state(const VkPipelineColorBlendAttachmentState& state)
+{
+    color_blend_attachments[0] = state;
+    return *this;
+}
+
 bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 {
     Pipeline& pp = *out_pipeline;
@@ -223,7 +229,7 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 
     for (size_t i = 0; i < pipeline_create_info.stageCount; ++i)
     {
-        shader_sources[i].spirv = Shaders::load_shader(shader_sources[i].filepath, nullptr, pipeline_create_info.pStages[i].stage, &shader_sources[i].size);
+        shader_sources[i].spirv = Shaders::load_shader(shader_sources[i].filepath, pipeline_create_info.pStages[i].pName, pipeline_create_info.pStages[i].stage, &shader_sources[i].size);
         if (!shader_sources[i].spirv) return false;
         VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
         info.codeSize = shader_sources[i].size;

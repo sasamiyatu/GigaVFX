@@ -92,17 +92,21 @@ struct ParticleRenderSettings
 
 struct GPUParticlePushConstants
 {
-    float delta_time;
-    uint particles_to_spawn;
-    float particle_size;
     float4 particle_color;
     float3 sort_axis;
+    float delta_time;
     uint64_t blas_address;
+    uint particles_to_spawn;
+    float particle_size;
+    uint num_slices;
 };
 
 struct GPUParticleSystemGlobals
 {
     float4x4 transform;
+    float4x4 light_view;
+    float4x4 light_proj;
+    uint2 light_resolution;
     uint particle_capacity;
 };
 
@@ -145,16 +149,9 @@ struct AccelerationStructureInstance
     uint64_t accelerationStructureReference;
 };
 
-struct GPUParticleIndirectData
-{
-    DispatchIndirectCommand dispatch_cmd;
-    DrawIndirectCommand draw_cmd;
-};
-
 struct GPUParticleSystemState
 {
     uint active_particle_count;
-    DispatchIndirectCommand simulate_command;
 };
 
 struct GPUParticle

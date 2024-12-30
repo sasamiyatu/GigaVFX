@@ -108,12 +108,13 @@ struct GraphicsPipelineBuilder
     GraphicsPipelineBuilder& set_depth_compare_op(VkCompareOp op);
     GraphicsPipelineBuilder& set_layout(VkPipelineLayout layout);
     GraphicsPipelineBuilder& set_cull_mode(VkCullModeFlagBits cull_mode);
-    GraphicsPipelineBuilder& set_vertex_shader_filepath(const char* filepath);
-    GraphicsPipelineBuilder& set_fragment_shader_filepath(const char* filepath);
+    GraphicsPipelineBuilder& set_vertex_shader_filepath(const char* filepath, const char* entry_point = "vs_main");
+    GraphicsPipelineBuilder& set_fragment_shader_filepath(const char* filepath, const char* entry_point = "fs_main");
     GraphicsPipelineBuilder& set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout);
     GraphicsPipelineBuilder& set_view_mask(uint32_t mask);
     GraphicsPipelineBuilder& set_topology(VkPrimitiveTopology topology);
     GraphicsPipelineBuilder& set_blend_preset(BlendPreset preset);
+    GraphicsPipelineBuilder& set_blend_state(const VkPipelineColorBlendAttachmentState& state);
 
     bool build(Pipeline* pipeline);
     void destroy_resources(Pipeline& pipeline);

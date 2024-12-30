@@ -325,11 +325,11 @@ int main(int argc, char** argv)
     ComputePipelineAsset* test_pipeline = new ComputePipelineAsset(builder);
     AssetCatalog::register_asset(test_pipeline);
 
-
-
+    glm::vec3 sundir = glm::normalize(glm::vec3(1.0f));
     bool running = true;
     bool texture_catalog_open = true;
     uint32_t frame_index = 0;
+    bool show_imgui_demo = false;
     while (running)
     {
         VkCommandBuffer command_buffer = ctx.begin_frame();
@@ -369,6 +369,9 @@ int main(int argc, char** argv)
                 case SDL_SCANCODE_F5:
                     AssetCatalog::force_reload_all();
                     break;
+                case SDL_SCANCODE_F10:
+                    show_imgui_demo = !show_imgui_demo;
+                    break;
                 default:
                     break;
                 }
@@ -402,6 +405,9 @@ int main(int argc, char** argv)
         {
             //texture_catalog.draw_ui(&texture_catalog_open);
         }
+
+        if (show_imgui_demo)
+            ImGui::ShowDemoWindow(&show_imgui_demo);
 
         //particle_system_manager.draw_ui();
         //gpu_particle_system.draw_stats_overlay();
@@ -489,7 +495,6 @@ int main(int argc, char** argv)
             globals.projection = glm::perspective(camera.fov, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, camera.znear, camera.zfar);
             globals.viewprojection = globals.projection * globals.view;
             globals.camera_pos = glm::vec4(camera.position, 1.0f);
-            glm::vec3 sundir = glm::normalize(glm::vec3(1.0f));
             globals.sun_direction = glm::vec4(sundir, 1.0f);
             globals.sun_color_and_intensity = glm::vec4(1.0f);
             globals.resolution = glm::vec2((float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
@@ -672,7 +677,7 @@ int main(int argc, char** argv)
         }
 
         // Where is the correct spot for this?
-        gpu_particle_system.simulate(command_buffer, (float)delta_time, camera);
+        gpu_particle_system.simulate(command_buffer, (float)delta_time, camera, sundir);
 
         { // Forward pass
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -744,10 +749,11 @@ int main(int argc, char** argv)
         }
 
         //particle_system_manager.render(command_buffer);
-        gpu_particle_system.render(command_buffer);
-
-
+        
         vkCmdEndRendering(command_buffer);
+
+        gpu_particle_system.render(command_buffer, hdr_render_target, depth_texture);
+
 
 #if 0
         DescriptorInfo desc_info[] = {
