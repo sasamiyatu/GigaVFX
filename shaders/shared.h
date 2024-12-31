@@ -100,6 +100,7 @@ struct GPUParticlePushConstants
     uint particles_to_spawn;
     float particle_size;
     uint num_slices;
+    float emitter_radius;
 };
 
 struct GPUParticleSystemGlobals

@@ -380,9 +380,9 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		draw_order_flipped = true;
 	}
 
-	//particle_sort_axis = -half_vector;
-	particle_sort_axis = -view_dir;
-	draw_order_flipped = true;
+	particle_sort_axis = -half_vector;
+	//particle_sort_axis = -view_dir;
+	//draw_order_flipped = true;
 
 	{ // Update per frame globals
 		// TODO: Use staging buffer for this
@@ -466,6 +466,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.particle_color = particle_color;
 	push_constants.sort_axis = particle_sort_axis;
 	push_constants.blas_address = VkHelpers::get_acceleration_structure_device_address(ctx->device, blas.acceleration_structure);
+	push_constants.emitter_radius = emitter_radius;
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
@@ -986,6 +987,7 @@ void GPUParticleSystem::draw_ui()
 	{
 		particle_spawn_rate = std::clamp(particle_spawn_rate, 0.0f, 10000000.0f);
 	}
+	ImGui::SliderFloat("emitter radius", &emitter_radius, 0.0f, 100.0f);
 	ImGui::SliderFloat("particle size", &particle_size, 0.001f, 1.0f);
 	ImGui::SliderFloat("particle alpha", &particle_color.a, 0.01f, 1.0f);
 	ImGui::ColorEdit3("particle color", glm::value_ptr(particle_color));

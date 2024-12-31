@@ -59,6 +59,7 @@ struct GPUParticleSystem
     bool display_single_slice = false;
     float shadow_alpha = 1.0f;
     bool draw_order_flipped = false;
+    float emitter_radius = 0.1f;
 
     Texture particle_render_target;
     Texture light_render_target;

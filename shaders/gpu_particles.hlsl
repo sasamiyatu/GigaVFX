@@ -57,7 +57,7 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     p.lifetime = 3.0;
     //p.velocity = point_on_sphere;
     //p.velocity = float3(0, 1, 0);
-    p.position = float3(0, 1, 0) + point_on_sphere * 0.1 * sqrt(float(seed.z) / float(0xFFFFFFFFu));
+    p.position = float3(0, 1, 0) + point_on_sphere * push_constants.emitter_radius * sqrt(float(seed.z) / float(0xFFFFFFFFu));
     //p.velocity = curl_noise(p.position);
     particles[global_particle_index + local_index] = p;
 }
@@ -71,7 +71,7 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
-        //p.velocity = curl_noise(p.position);
+        p.velocity = curl_noise(p.position);
         uint4 seed = uint4(globals.frame_index, asuint(p.position));
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
@@ -329,7 +329,8 @@ PSOutput particle_fs_light(PSInput input)
     float r = distance(center_pos, input.position.xy);
     r /= (input.frag_point_size * 0.5);
     //float alpha = 1.0 - smoothstep(0.0, 1.0, r);
-    float alpha = 1.0 - saturate(r);
+    //float alpha = 1.0 - saturate(r);
+    float alpha = r < 1.0 ? 1.0 : 0.0;
 
     float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
     output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
@@ -351,6 +352,7 @@ PSOutput particle_fs_shadowed(PSInput input)
     r /= (input.frag_point_size * 0.5);
     //float alpha = 1.0 - smoothstep(0.0, 1.0, r);
     float alpha = 1.0 - saturate(r);
+    //float alpha = r < 1.0 ? 1.0 : 0.0;
 
     float4 view_pos = mul(globals.projection_inverse, float4(clip_pos.xy, input.position.z, 1.0));
     float4 world_pos = mul(globals.view_inverse, view_pos);
@@ -366,7 +368,6 @@ PSOutput particle_fs_shadowed(PSInput input)
 
     float4 light_sample = light_texture.Sample(light_sampler, light_uv);
     float3 shadow = 1.0 - light_sample.rgb;
-    shadow = max(shadow, 0.1);
 
     float3 fake_normal_ss = float3(0, 0, 1);
     float3 edge_normal_ss = normalize(float3(input.position.xy - center_pos.xy, 0.0));
@@ -381,9 +382,10 @@ PSOutput particle_fs_shadowed(PSInput input)
     float NoL = saturate(dot(fake_normal_ws, globals.sun_direction.xyz));
 
     float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
-    //in_color.rgb *= shadow;
-    in_color.rgb = fake_normal_ss * 0.5 + 0.5;
-    in_color.rgb = NoL;
+    in_color.rgb *= shadow;
+    //in_color.rgb += push_constants.particle_color * 0.1;
+    //in_color.rgb = fake_normal_ss * 0.5 + 0.5;
+    //in_color.rgb = NoL;
     output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
 
     return output;
