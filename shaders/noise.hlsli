@@ -17,7 +17,7 @@ float3 hash(uint3 x)
 // 1: quintic
 #define INTERPOLANT 0
 
-float gradient_noise( in float3 p )
+float gradient_noise3d( in float3 p )
 {
     float3 i = floor( p );
     float3 f = frac( p );
@@ -39,6 +39,7 @@ float gradient_noise( in float3 p )
                      lerp( dot( hash( uint3(i) + uint3(0,1,1) ), f - float3(0.0,1.0,1.0) ), 
                           dot( hash( uint3(i) + uint3(1,1,1) ), f - float3(1.0,1.0,1.0) ), u.x), u.y), u.z );
 }
+
 
 // Computes the analytic derivatives of a 3D Gradient Noise. This can be used for example to compute normals to a
 // 3d rocks based on Gradient Noise without approximating the gradient by having to take central differences.

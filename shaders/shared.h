@@ -71,6 +71,7 @@ struct ShaderGlobals
     float4x4 view;
     float4x4 view_inverse;
     float4x4 projection;
+    float4x4 projection_inverse;
     float4x4 viewprojection;
     float4x4 shadow_view[4];
     float4x4 shadow_projection[4];

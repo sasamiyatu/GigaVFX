@@ -54,13 +54,17 @@ namespace VkHelpers
 
 	inline void full_barrier(VkCommandBuffer cmd)
 	{
-		VkMemoryBarrier memory_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-		memory_barrier.srcAccessMask = 0;
-		memory_barrier.dstAccessMask = 0;
-		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
-			1, &memory_barrier,
-			0, nullptr,
-			0, nullptr);
+		VkMemoryBarrier2 memory_barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+		memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT_KHR;
+		memory_barrier.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT_KHR | VK_ACCESS_2_MEMORY_WRITE_BIT_KHR ;
+		memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT_KHR;
+		memory_barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT_KHR | VK_ACCESS_2_MEMORY_WRITE_BIT_KHR;
+
+		VkDependencyInfo dependency_info = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+		dependency_info.memoryBarrierCount = 1;
+		dependency_info.pMemoryBarriers = &memory_barrier;
+
+		vkCmdPipelineBarrier2(cmd, &dependency_info);
 	}
 
 	inline VkDeviceAddress get_buffer_device_address(VkDevice device, VkBuffer buffer)

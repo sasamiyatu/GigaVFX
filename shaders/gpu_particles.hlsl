@@ -53,10 +53,12 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
     float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
     GPUParticle p;
+    p.velocity = 0;
     p.lifetime = 3.0;
     //p.velocity = point_on_sphere;
-    p.position = float3(0, 1, 0) + point_on_sphere * 0.1;
-    p.velocity = curl_noise(p.position);
+    //p.velocity = float3(0, 1, 0);
+    p.position = float3(0, 1, 0) + point_on_sphere * 0.1 * sqrt(float(seed.z) / float(0xFFFFFFFFu));
+    //p.velocity = curl_noise(p.position);
     particles[global_particle_index + local_index] = p;
 }
 
@@ -69,7 +71,7 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
-        p.velocity = curl_noise(p.position);
+        //p.velocity = curl_noise(p.position);
         uint4 seed = uint4(globals.frame_index, asuint(p.position));
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
@@ -102,6 +104,7 @@ void cs_write_draw( uint3 thread_id : SV_DispatchThreadID )
         ? active_particles
         : (active_particles + push_constants.num_slices - 1) / push_constants.num_slices;
 
+#if 0 
     if (thread_id.x == 0)
     {
         printf("particle count: %d, draw count: %d, slices: %d", 
@@ -110,6 +113,7 @@ void cs_write_draw( uint3 thread_id : SV_DispatchThreadID )
             push_constants.num_slices
         );
     }
+#endif
 
     DrawIndirectCommand draw_cmd;
     draw_cmd.vertexCount = 1;
@@ -259,6 +263,7 @@ VSOutput vs_main(VSInput input)
     output.position = mul(globals.projection, view_pos);
     output.center_pos = output.position.xy / output.position.w;
 
+    //printf("wpos vs: %f %f %f", pos);
     const float particle_size = push_constants.particle_size;
     float4 corner = float4(particle_size * 0.5, particle_size * 0.5, view_pos.z, 1.0);
     float4 proj_corner = mul(globals.projection, corner);
@@ -279,18 +284,17 @@ VSOutput vs_light(VSInput input)
     float4 view_pos = mul(system_globals.light_view, pos);
     output.position = mul(system_globals.light_proj, view_pos);
     output.center_pos = output.position.xy / output.position.w;
-    //printf("id: %d", input.instance_id);
-    // if (input.instance_id == 0)
-    //     printf("center vs: %f  %f", output.center_pos.x, output.center_pos.y);
+
     const float particle_size = push_constants.particle_size;
     float4 corner = float4(particle_size * 0.5, particle_size * 0.5, view_pos.z, 1.0);
     float4 proj_corner = mul(system_globals.light_proj, corner);
     float point_size = system_globals.light_resolution.x * proj_corner.x / proj_corner.w;
-    //float point_size = 10.0f;
+
     output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
     output.frag_point_size = output.point_size;
     output.world_pos = pos.xyz;
     output.out_instance_id = input.instance_id;
+
     return output;
 }
 
@@ -324,8 +328,8 @@ PSOutput particle_fs_light(PSInput input)
 #endif
     float r = distance(center_pos, input.position.xy);
     r /= (input.frag_point_size * 0.5);
-    float alpha = 1.0 - smoothstep(0.0, 1.0, r);
-    //alpha = 1.0;
+    //float alpha = 1.0 - smoothstep(0.0, 1.0, r);
+    float alpha = 1.0 - saturate(r);
 
     float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
     output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
@@ -345,9 +349,41 @@ PSOutput particle_fs_shadowed(PSInput input)
     center_pos.y = globals.resolution.y - center_pos.y;
     float r = distance(center_pos, input.position.xy);
     r /= (input.frag_point_size * 0.5);
-    float alpha = 1.0 - smoothstep(0.0, 1.0, r);
+    //float alpha = 1.0 - smoothstep(0.0, 1.0, r);
+    float alpha = 1.0 - saturate(r);
+
+    float4 view_pos = mul(globals.projection_inverse, float4(clip_pos.xy, input.position.z, 1.0));
+    float4 world_pos = mul(globals.view_inverse, view_pos);
+    world_pos /= world_pos.w;
+
+    float4 light_view = mul(system_globals.light_view, world_pos);
+    float4 light_clip = mul(system_globals.light_proj, light_view);
+    light_clip /= light_clip.w;
+
+    float2 light_uv = light_clip * 0.5 + 0.5;
+    //light_uv.y = 1.0 - light_uv.y;
+    // Flip?
+
+    float4 light_sample = light_texture.Sample(light_sampler, light_uv);
+    float3 shadow = 1.0 - light_sample.rgb;
+    shadow = max(shadow, 0.1);
+
+    float3 fake_normal_ss = float3(0, 0, 1);
+    float3 edge_normal_ss = normalize(float3(input.position.xy - center_pos.xy, 0.0));
+    if (length(edge_normal_ss) > 1e-2)
+    {
+        fake_normal_ss = normalize(lerp(fake_normal_ss, edge_normal_ss, r));
+    }
+
+    fake_normal_ss.y = -fake_normal_ss.y;
+
+    float3 fake_normal_ws = normalize(mul(globals.view_inverse, float4(fake_normal_ss, 0.0)).xyz);
+    float NoL = saturate(dot(fake_normal_ws, globals.sun_direction.xyz));
 
     float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
+    //in_color.rgb *= shadow;
+    in_color.rgb = fake_normal_ss * 0.5 + 0.5;
+    in_color.rgb = NoL;
     output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
 
     return output;

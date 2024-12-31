@@ -309,8 +309,8 @@ int main(int argc, char** argv)
     ParticleSystemManager particle_system_manager;
     particle_system_manager.init(&particle_renderer);
 
-    constexpr uint32_t particle_capacity = 32768;
-    //constexpr uint32_t particle_capacity = 1048576;
+    //constexpr uint32_t particle_capacity = 32768;
+    constexpr uint32_t particle_capacity = 1048576;
     //constexpr uint32_t particle_capacity = 8;
     GPUParticleSystem gpu_particle_system;
     gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity);
@@ -493,6 +493,7 @@ int main(int argc, char** argv)
             globals.view = glm::lookAt(camera.position, camera.position + camera.forward, camera.up);
             globals.view_inverse = glm::inverse(globals.view);
             globals.projection = glm::perspective(camera.fov, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, camera.znear, camera.zfar);
+            globals.projection_inverse = glm::inverse(globals.projection);
             globals.viewprojection = globals.projection * globals.view;
             globals.camera_pos = glm::vec4(camera.position, 1.0f);
             globals.sun_direction = glm::vec4(sundir, 1.0f);
