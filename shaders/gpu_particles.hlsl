@@ -71,7 +71,7 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
-        p.velocity = (float3(1, 0, 0) * 3.0 + curl_noise(p.position, push_constants.time * 0.1) * push_constants.noise_scale) * push_constants.speed;
+        p.velocity = (float3(1, 0, 0) * 3.0 + curl_noise(p.position, push_constants.time * push_constants.noise_time_scale) * push_constants.noise_scale) * push_constants.speed;
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
@@ -271,7 +271,7 @@ VSOutput vs_main(VSInput input)
     float4 light_view = mul(system_globals.light_view, pos);
     float4 light_clip = mul(system_globals.light_proj, light_view);
     light_clip /= light_clip.w;
-    float2 light_uv = light_clip * 0.5 + 0.5;
+    float2 light_uv = light_clip.xy * 0.5 + 0.5;
     float4 light_sample = light_texture.SampleLevel(light_sampler, light_uv, 0);
     //float3 shadow = 1.0 - light_sample.a * 0.75;
     float3 shadow = 1.0 - light_sample.rgb;

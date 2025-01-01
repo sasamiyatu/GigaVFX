@@ -105,6 +105,7 @@ struct GPUParticlePushConstants
     float time;
     float lifetime;
     float noise_scale;
+    float noise_time_scale;
 };
 
 struct GPUParticleSystemGlobals

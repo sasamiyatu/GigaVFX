@@ -50,19 +50,20 @@ struct GPUParticleSystem
     float particle_spawn_rate = 10000.0f;
     float particles_to_spawn = 0.0f;
     bool particles_initialized = false;
-    float particle_size = 0.1f; // World space
-    glm::vec4 particle_color = glm::vec4(1.0f);
+    float particle_size = 0.05f; // World space
+    glm::vec4 particle_color = glm::vec4(glm::vec3(1.0f), 0.2f);
     glm::vec3 particle_sort_axis = glm::vec3(1.0f, 0.0f, 0.0f);
     float particle_lifetime = 3.0f;
     float noise_scale = 1.0f;
+    float noise_time_scale = 1.0f;
     bool sort_particles = true;
     uint32_t num_slices = 64;
     int slices_to_display = 64;
     bool display_single_slice = false;
-    float shadow_alpha = 1.0f;
+    float shadow_alpha = 0.2f;
     bool draw_order_flipped = false;
     float emitter_radius = 0.1f;
-    float particle_speed = 1.0f;
+    float particle_speed = 0.5f;
     float time = 0.0f;
     glm::vec3 color_attenuation = glm::vec3(1.0f);
 

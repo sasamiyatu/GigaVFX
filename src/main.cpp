@@ -214,6 +214,22 @@ int main(int argc, char** argv)
     Texture hdr_render_target;
     ctx.create_texture(hdr_render_target, WINDOW_WIDTH, WINDOW_HEIGHT, 1, RENDER_TARGET_FORMAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
 
+
+    GraphicsPipelineAsset* depth_prepass = nullptr;
+    {
+        GraphicsPipelineBuilder pipeline_builder(ctx.device, true);
+        pipeline_builder.set_vertex_shader_filepath("depth_prepass.hlsl")
+            .set_fragment_shader_filepath("depth_prepass.hlsl")
+            .set_cull_mode(VK_CULL_MODE_NONE)
+            .set_depth_format(VK_FORMAT_D32_SFLOAT)
+            .set_depth_test(VK_TRUE)
+            .set_depth_write(VK_TRUE)
+            .set_depth_compare_op(VK_COMPARE_OP_LESS);
+
+        depth_prepass = new GraphicsPipelineAsset(pipeline_builder);
+        AssetCatalog::register_asset(depth_prepass);
+    }
+
     GraphicsPipelineBuilder pipeline_builder(ctx.device, true);
     pipeline_builder
         .set_vertex_shader_filepath("forward.hlsl")
@@ -222,12 +238,13 @@ int main(int argc, char** argv)
         .set_cull_mode(VK_CULL_MODE_NONE)
         .set_depth_format(VK_FORMAT_D32_SFLOAT)
         .set_depth_test(VK_TRUE)
-        .set_depth_write(VK_TRUE)
-        .set_depth_compare_op(VK_COMPARE_OP_LESS)
+        .set_depth_write(VK_FALSE)
+        .set_depth_compare_op(VK_COMPARE_OP_EQUAL)
         .set_descriptor_set_layout(1, ctx.bindless_descriptor_set_layout);
 
     GraphicsPipelineAsset* pipeline = new GraphicsPipelineAsset(pipeline_builder);
     AssetCatalog::register_asset(pipeline);
+
 
     GraphicsPipelineBuilder shadowmap_builder(ctx.device, true);
     shadowmap_builder
@@ -680,6 +697,81 @@ int main(int argc, char** argv)
         // Where is the correct spot for this?
         gpu_particle_system.simulate(command_buffer, (float)delta_time, camera, sundir);
 
+        { // Depth prepass
+            VkRenderingAttachmentInfo depth_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            depth_info.imageView = depth_texture.view;
+            depth_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            depth_info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            depth_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            depth_info.clearValue.depthStencil.depth = 1.0f;
+
+            VkRenderingInfo rendering_info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+            rendering_info.renderArea = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+            rendering_info.layerCount = 1;
+            rendering_info.viewMask = 0;
+            rendering_info.pDepthAttachment = &depth_info;
+
+            vkCmdBeginRendering(command_buffer, &rendering_info);
+
+            VkRect2D scissor = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+            VkViewport viewport = { 0.0f, (float)WINDOW_HEIGHT, (float)WINDOW_WIDTH, -(float)WINDOW_HEIGHT, 0.0f, 1.0f };
+            vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_prepass->pipeline.pipeline);
+
+            DescriptorInfo descriptor_info[] = {
+                DescriptorInfo(globals_buffer.buffer),
+            };
+
+            vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, depth_prepass->pipeline.descriptor_update_template, 
+                depth_prepass->pipeline.layout, 0, descriptor_info);
+
+            for (const auto& mi : mesh_draws)
+            {
+                const Mesh& mesh = meshes[mi.mesh_index];
+
+                PushConstantsForward pc{};
+                static_assert(sizeof(pc) <= 128);
+
+                pc.model = mi.transform;
+                pc.position_buffer = ctx.buffer_device_address(mesh.position);
+                if (mesh.normal) pc.normal_buffer = ctx.buffer_device_address(mesh.normal);
+                if (mesh.tangent) pc.tangent_buffer = ctx.buffer_device_address(mesh.tangent);
+                if (mesh.texcoord0) pc.texcoord0_buffer = ctx.buffer_device_address(mesh.texcoord0);
+                if (mesh.texcoord1) pc.texcoord1_buffer = ctx.buffer_device_address(mesh.texcoord1);
+
+                vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+                for (const auto& primitive : mesh.primitives)
+                {
+                    pc.material_index = primitive.material;
+
+                    vkCmdPushConstants(command_buffer, pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+                    vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
+                }
+            }
+
+            vkCmdEndRendering(command_buffer);
+
+            VkImageMemoryBarrier2 image_barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+            image_barrier.srcStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+            image_barrier.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            image_barrier.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+            image_barrier.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+            image_barrier.image = depth_texture.image;
+            image_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            image_barrier.subresourceRange.baseArrayLayer = 0;
+            image_barrier.subresourceRange.baseMipLevel = 0;
+            image_barrier.subresourceRange.layerCount = 1;
+            image_barrier.subresourceRange.levelCount = 1;
+
+            VkDependencyInfo dependency_info{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+            dependency_info.imageMemoryBarrierCount = 1;
+            dependency_info.pImageMemoryBarriers = &image_barrier;
+
+            vkCmdPipelineBarrier2(command_buffer, &dependency_info);
+        }
+
         { // Forward pass
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             color_info.imageView = hdr_render_target.view;
@@ -691,8 +783,8 @@ int main(int argc, char** argv)
             VkRenderingAttachmentInfo depth_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             depth_info.imageView = depth_texture.view;
             depth_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-            depth_info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            depth_info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            depth_info.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            depth_info.storeOp = VK_ATTACHMENT_STORE_OP_NONE;
             depth_info.clearValue.depthStencil.depth = 1.0f;
 
             VkRenderingInfo rendering_info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
@@ -749,8 +841,6 @@ int main(int argc, char** argv)
             }
         }
 
-        //particle_system_manager.render(command_buffer);
-        
         vkCmdEndRendering(command_buffer);
 
         gpu_particle_system.render(command_buffer, hdr_render_target, depth_texture);
@@ -852,6 +942,7 @@ int main(int argc, char** argv)
         vmaDestroyImage(ctx.allocator, t.image, t.allocation);
     }
     gpu_particle_system.destroy();
+    depth_prepass->builder.destroy_resources(depth_prepass->pipeline);
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);

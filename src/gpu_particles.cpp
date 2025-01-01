@@ -462,6 +462,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.time = time;
 	push_constants.lifetime = particle_lifetime;
 	push_constants.noise_scale = noise_scale;
+	push_constants.noise_time_scale = noise_time_scale;
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
@@ -993,7 +994,8 @@ void GPUParticleSystem::draw_ui()
 	ImGui::SliderFloat("particle lifetime", &particle_lifetime, 0.0f, 20.0f);
 	ImGui::SliderFloat("particle alpha", &particle_color.a, 0.01f, 1.0f);
 	ImGui::ColorEdit3("particle color", glm::value_ptr(particle_color));
-	ImGui::SliderFloat("noise scale", &noise_scale, 0.0f, 3.0f);
+	ImGui::SliderFloat("noise scale", &noise_scale, 0.0f, 10.0f);
+	ImGui::SliderFloat("noise time scale", &noise_time_scale, 0.0f, 10.0f);
 	ImGui::Checkbox("sort particles", &sort_particles);
 
 	if (ImGui::SliderScalar("number of slices", ImGuiDataType_U32, &num_slices, &MIN_SLICES, &MAX_SLICES))
