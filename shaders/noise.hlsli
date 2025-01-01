@@ -95,20 +95,27 @@ float3 curl_noise(float3 x, float t)
 {
 #if 0
      // Derivatives of gradient noise
-     float3 psi1 = gradient_noise_deriv(x).yzw;
-     float3 psi2 = gradient_noise_deriv(x + float3(123.2213, -1053.4, 60421.62)).yzw;
-     float3 psi3 = gradient_noise_deriv(x + float3(-9591.4, 1053.12, -7123.95)).yzw;
+     float scale = max(x.x, 0.0);
+     float3 psi1 = gradient_noise_deriv(x).yzw * scale;
+     float3 psi2 = gradient_noise_deriv(x + float3(123.2213, -1053.4, 60421.62)).yzw * scale;
+     float3 psi3 = gradient_noise_deriv(x + float3(-9591.4, 1053.12, -7123.95)).yzw * scale;
 
      float3 curl = float3(psi3.y - psi2.z, psi1.z - psi3.x, psi2.x - psi1.y);
 #else
-     float4 psi1, psi2, psi3;
-     simplex_noise_4d(float4(x, t), psi1);
-     simplex_noise_4d(float4(x + float3(123.2213, -1053.4, 60421.62), t), psi2);
-     simplex_noise_4d(float4(x + float3(-9591.4, 1053.12, -7123.95), t), psi3);
+     float4 x1 = float4(x, t);
+     float4 x2 = float4(x + float3(123.2213, -1053.4, 60421.62), t);
+     float4 x3 = float4(x + float3(-9591.4, 1053.12, -7123.95), t);
 
-     float3 curl = float3(psi3.y - psi2.z, psi1.z - psi3.x, psi2.x - psi1.y);
+     const float epsilon = 1e-3f;
+     float dp3dy = (snoise(x3 + float4(0, 1, 0, 0) * epsilon) - snoise(x3)) / epsilon;
+     float dp2dz = (snoise(x2 + float4(0, 0, 1, 0) * epsilon) - snoise(x2)) / epsilon;
+     float dp1dz = (snoise(x1 + float4(0, 0, 1, 0) * epsilon) - snoise(x1)) / epsilon;
+     float dp3dx = (snoise(x3 + float4(1, 0, 0, 0) * epsilon) - snoise(x3)) / epsilon;
+     float dp2dx = (snoise(x2 + float4(1, 0, 0, 0) * epsilon) - snoise(x2)) / epsilon;
+     float dp1dy = (snoise(x1 + float4(0, 1, 0, 0) * epsilon) - snoise(x1)) / epsilon;
+
+     float3 curl = float3(dp3dy - dp2dz, dp1dz - dp3dx, dp2dx - dp1dy);
 #endif
-
 
      return curl;
 }

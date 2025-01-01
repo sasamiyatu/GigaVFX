@@ -54,7 +54,7 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
     GPUParticle p;
     p.velocity = 0;
-    p.lifetime = 3.0;
+    p.lifetime = push_constants.lifetime;
     //p.velocity = point_on_sphere;
     //p.velocity = float3(0, 1, 0);
     p.position = float3(0, 1, 0) + point_on_sphere * push_constants.emitter_radius * sqrt(float(seed.z) / float(0xFFFFFFFFu));
@@ -71,9 +71,7 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
-        p.velocity = curl_noise(p.position, push_constants.time * 0.1) * push_constants.speed;
-        if (thread_id.x == 0) printf("v: %f %f %f, t: %f", p.velocity.x, p.velocity.y, p.velocity.z, push_constants.time);
-        uint4 seed = uint4(globals.frame_index, asuint(p.position));
+        p.velocity = (float3(1, 0, 0) * 3.0 + curl_noise(p.position, push_constants.time * 0.1) * push_constants.noise_scale) * push_constants.speed;
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
@@ -276,7 +274,7 @@ VSOutput vs_main(VSInput input)
     float2 light_uv = light_clip * 0.5 + 0.5;
     float4 light_sample = light_texture.SampleLevel(light_sampler, light_uv, 0);
     //float3 shadow = 1.0 - light_sample.a * 0.75;
-    float3 shadow = light_sample.rgb;
+    float3 shadow = 1.0 - light_sample.rgb;
 
     output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
     output.frag_point_size = output.point_size;
@@ -338,7 +336,7 @@ PSOutput particle_fs_light(PSInput input)
     float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
     
     //output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
-    output.color = float4(0, 0, 0, in_color.a); // Premultiplied alpha
+    output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
 
     return output;
 }

@@ -1,176 +1,135 @@
-// original -> http://staffwww.itn.liu.se/~stegu/aqsis/aqsis-newnoise/sdnoise1234.c
+//
+// Description : Array and textureless GLSL 2D/3D/4D simplex
+//               noise functions.
+//      Author : Ian McEwan, Ashima Arts.
+//  Maintainer : ijm
+//     Lastmod : 20110822 (ijm)
+//     License : Copyright (C) 2011 Ashima Arts. All rights reserved.
+//               Distributed under the MIT License. See LICENSE file.
+//               https://github.com/ashima/webgl-noise
+//
 
-static const int perm[512] = {
-    151,160,137,91,90,15,
-    131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,
-    190, 6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,
-    88,237,149,56,87,174,20,125,136,171,168, 68,175,74,165,71,134,139,48,27,166,
-    77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
-    102,143,54, 65,25,63,161, 1,216,80,73,209,76,132,187,208, 89,18,169,200,196,
-    135,130,116,188,159,86,164,100,109,198,173,186, 3,64,52,217,226,250,124,123,
-    5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,
-    223,183,170,213,119,248,152, 2,44,154,163, 70,221,153,101,155,167, 43,172,9,
-    129,22,39,253, 19,98,108,110,79,113,224,232,178,185, 112,104,218,246,97,228,
-    251,34,242,193,238,210,144,12,191,179,162,241, 81,51,145,235,249,14,239,107,
-    49,192,214, 31,181,199,106,157,184, 84,204,176,115,121,50,45,127, 4,150,254,
-    138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180,
-    151,160,137,91,90,15,
-    131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,
-    190, 6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,
-    88,237,149,56,87,174,20,125,136,171,168, 68,175,74,165,71,134,139,48,27,166,
-    77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
-    102,143,54, 65,25,63,161, 1,216,80,73,209,76,132,187,208, 89,18,169,200,196,
-    135,130,116,188,159,86,164,100,109,198,173,186, 3,64,52,217,226,250,124,123,
-    5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,
-    223,183,170,213,119,248,152, 2,44,154,163, 70,221,153,101,155,167, 43,172,9,
-    129,22,39,253, 19,98,108,110,79,113,224,232,178,185, 112,104,218,246,97,228,
-    251,34,242,193,238,210,144,12,191,179,162,241, 81,51,145,235,249,14,239,107,
-    49,192,214, 31,181,199,106,157,184, 84,204,176,115,121,50,45,127, 4,150,254,
-    138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180 
-};
-
-// 32 tesseract edges
-static const float4 grad4lut[32] = {
-    float4( 0.0, 1.0, 1.0, 1.0),float4( 0.0, 1.0, 1.0,-1.0),float4( 0.0, 1.0,-1.0, 1.0),float4( 0.0, 1.0,-1.0,-1.0), 
-    float4( 0.0,-1.0, 1.0, 1.0),float4( 0.0,-1.0, 1.0,-1.0),float4( 0.0,-1.0,-1.0, 1.0),float4( 0.0,-1.0,-1.0,-1.0),
-    float4( 1.0, 0.0, 1.0, 1.0),float4( 1.0, 0.0, 1.0,-1.0),float4( 1.0, 0.0,-1.0, 1.0),float4( 1.0, 0.0,-1.0,-1.0),
-    float4(-1.0, 0.0, 1.0, 1.0),float4(-1.0, 0.0, 1.0,-1.0),float4(-1.0, 0.0,-1.0, 1.0),float4(-1.0, 0.0,-1.0,-1.0),
-    float4( 1.0, 1.0, 0.0, 1.0),float4( 1.0, 1.0, 0.0,-1.0),float4( 1.0,-1.0, 0.0, 1.0),float4( 1.0,-1.0, 0.0,-1.0),
-    float4(-1.0, 1.0, 0.0, 1.0),float4(-1.0, 1.0, 0.0,-1.0),float4(-1.0,-1.0, 0.0, 1.0),float4(-1.0,-1.0, 0.0,-1.0),
-    float4( 1.0, 1.0, 1.0, 0.0),float4( 1.0, 1.0,-1.0, 0.0),float4( 1.0,-1.0, 1.0, 0.0),float4( 1.0,-1.0,-1.0, 0.0),
-    float4(-1.0, 1.0, 1.0, 0.0),float4(-1.0, 1.0,-1.0, 0.0),float4(-1.0,-1.0, 1.0, 0.0),float4(-1.0,-1.0,-1.0, 0.0)
-};
-
-static const int4 simplex[64] = {
-    int4(0,1,2,3),int4(0,1,3,2),int4(0,0,0,0),int4(0,2,3,1),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(1,2,3,0),
-    int4(0,2,1,3),int4(0,0,0,0),int4(0,3,1,2),int4(0,3,2,1),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(1,3,2,0),
-    int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),
-    int4(1,2,0,3),int4(0,0,0,0),int4(1,3,0,2),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(2,3,0,1),int4(2,3,1,0),
-    int4(1,0,2,3),int4(1,0,3,2),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(2,0,3,1),int4(0,0,0,0),int4(2,1,3,0),
-    int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),
-    int4(2,0,1,3),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(3,0,1,2),int4(3,0,2,1),int4(0,0,0,0),int4(3,1,2,0),
-    int4(2,1,0,3),int4(0,0,0,0),int4(0,0,0,0),int4(0,0,0,0),int4(3,1,0,2),int4(0,0,0,0),int4(3,2,0,1),int4(3,2,1,0)
-};
-
-float4 grad4 (int hash) {
-    return grad4lut[hash & 31];
+float4 mod289(float4 x) 
+{
+    return x - floor(x * (1.0 / 289.0)) * 289.0; 
 }
 
-static const float F4 = 0.309016994;
-static const float G4 = 0.138196601;
+float mod289(float x) 
+{
+    return x - floor(x * (1.0 / 289.0)) * 289.0; 
+}
 
-float simplex_noise_4d(float4 v, out float4 d) {
-  
-    float n0, n1, n2, n3, n4; 
-    float noise; 
-    float t20, t21, t22, t23, t24;
-    float t40, t41, t42, t43, t44;
+float4 permute(float4 x) 
+{
+    return mod289(((x*34.0)+1.0)*x);
+}
 
-    float4 vs = v + (v.x + v.y + v.z + v.w) * F4;
-    int4 i = int4(floor(vs));
-    float t = float(i.x + i.y + i.z + i.w) * G4; 
-    float4 V0 = float4(i) - t; 
-    float4 v0 = v - V0;
+float permute(float x) 
+{
+    return mod289(((x*34.0)+1.0)*x);
+}
 
-    int c1 = (v0.x > v0.y) ? 32 : 0;
-    int c2 = (v0.x > v0.z) ? 16 : 0;
-    int c3 = (v0.y > v0.z) ? 8 : 0;
-    int c4 = (v0.x > v0.w) ? 4 : 0;
-    int c5 = (v0.y > v0.w) ? 2 : 0;
-    int c6 = (v0.z > v0.w) ? 1 : 0;
-    int c = c1 | c2 | c3 | c4 | c5 | c6; 
+float4 taylorInvSqrt(float4 r)
+{
+    return 1.79284291400159 - 0.85373472095314 * r;
+}
 
-    int4 s = simplex[c];
+float taylorInvSqrt(float r)
+{
+    return 1.79284291400159 - 0.85373472095314 * r;
+}
 
-    int4 i1 = int4(s.x>=3?1:0,s.y>=3?1:0,s.z>=3?1:0,s.w>=3?1:0);
-    int4 i2 = int4(s.x>=2?1:0,s.y>=2?1:0,s.z>=2?1:0,s.w>=2?1:0);
-    int4 i3 = int4(s.x>=1?1:0,s.y>=1?1:0,s.z>=1?1:0,s.w>=1?1:0);
+float4 grad4(float j, float4 ip)
+{
+    const float4 ones = float4(1.0, 1.0, 1.0, -1.0);
+    float4 p,s;
 
-    float4 v1 = v0 - float4(i1) + G4;
-    float4 v2 = v0 - float4(i2) + 2.0 * G4; 
-    float4 v3 = v0 - float4(i3) + 3.0 * G4;
-    float4 v4 = v0 - 1.0 + 4.0 * G4;
+    p.xyz = floor( frac (j.xxx * ip.xyz) * 7.0) * ip.z - 1.0;
+    p.w = 1.5 - dot(abs(p.xyz), ones.xyz);
+    //s = float4(lessThan(p, float4(0, 0, 0, 0)));
+    s = p < 0.0;
+    p.xyz = p.xyz + (s.xyz*2.0 - 1.0) * s.www;
 
-    int ii = i.x & 0xff;
-    int jj = i.y & 0xff;
-    int kk = i.z & 0xff;
-    int ll = i.w & 0xff;
+    return p;
+}
 
-    float4 p0 = v0*v0;
-    float4 p1 = v1*v1;
-    float4 p2 = v2*v2;
-    float4 p3 = v3*v3;
-    float4 p4 = v4*v4;
+// (sqrt(5) - 1)/4 = F4, used once below
+#define F4 0.309016994374947451
 
-    float t0 = 0.6 - p0.x-p0.y-p0.z-p0.w;
-    float t1 = 0.6 - p1.x-p1.y-p1.z-p1.w;
-    float t2 = 0.6 - p2.x-p2.y-p2.z-p2.w;
-    float t3 = 0.6 - p3.x-p3.y-p3.z-p3.w;
-    float t4 = 0.6 - p4.x-p4.y-p4.z-p4.w;
+float snoise(float4 v)
+{
+    const float4  C = float4( 0.138196601125011,  // (5 - sqrt(5))/20  G4
+                        0.276393202250021,  // 2 * G4
+                        0.414589803375032,  // 3 * G4
+                        -0.447213595499958); // -1 + 4 * G4
 
-    float4 g0, g1, g2, g3, g4;
+    // First corner
+    float4 i  = floor(v + dot(v, F4.xxxx) );
+    float4 x0 = v -   i + dot(i, C.xxxx);
 
-    if (t0 < 0.0) {
-        n0 = t0 = t20 = t40 = 0.0;
-    } else {
-        t20 = t0 * t0;
-        t40 = t20 * t20;
-        g0 = grad4(perm[ii+perm[jj+perm[kk+perm[ll]]]]);
-        n0 = t40 * dot( g0, v0 );
-    }
+    // Other corners
 
-    if (t1 < 0.0) {
-        n1 = t1 = t21 = t41 = 0.0;
-    } else {
-        t21 = t1 * t1;
-        t41 = t21 * t21;
-        g1 = grad4(perm[ii+i1.x+perm[jj+i1.y+perm[kk+i1.z+perm[ll+i1.w]]]]);
-        n1 = t41 * dot( g1, v1 );
-    }
+    // Rank sorting originally contributed by Bill Licea-Kane, AMD (formerly ATI)
+    float4 i0;
+    float3 isX = step( x0.yzw, x0.xxx );
+    float3 isYZ = step( x0.zww, x0.yyz );
+    //  i0.x = dot( isX, float3( 1.0 ) );
+    i0.x = isX.x + isX.y + isX.z;
+    i0.yzw = 1.0 - isX;
+    //  i0.y += dot( isYZ.xy, float2( 1.0 ) );
+    i0.y += isYZ.x + isYZ.y;
+    i0.zw += 1.0 - isYZ.xy;
+    i0.z += isYZ.z;
+    i0.w += 1.0 - isYZ.z;
 
-    if (t2 < 0.0) {
-        n2 = t2 = t22 = t42 = 0.0;
-    } else {
-        t22 = t2 * t2;
-        t42 = t22 * t22;
-        g2 = grad4(perm[ii+i2.x+perm[jj+i2.y+perm[kk+i2.z+perm[ll+i2.w]]]]);
-        n2 = t42 * dot( g2, v2 );
-    }
+    // i0 now contains the unique values 0,1,2,3 in each channel
+    float4 i3 = clamp( i0, 0.0, 1.0 );
+    float4 i2 = clamp( i0-1.0, 0.0, 1.0 );
+    float4 i1 = clamp( i0-2.0, 0.0, 1.0 );
 
-    if (t3 < 0.0) {
-        n3 = t3 = t23 = t43 = 0.0;
-    } else {
-        t23 = t3 * t3;
-        t43 = t23 * t23;
-        g3 = grad4(perm[ii+i3.x+perm[jj+i3.y+perm[kk+i3.z+perm[ll+i3.w]]]]);
-        n3 = t43 * dot( g3, v3 );
-    }
+    //  x0 = x0 - 0.0 + 0.0 * C.xxxx
+    //  x1 = x0 - i1  + 1.0 * C.xxxx
+    //  x2 = x0 - i2  + 2.0 * C.xxxx
+    //  x3 = x0 - i3  + 3.0 * C.xxxx
+    //  x4 = x0 - 1.0 + 4.0 * C.xxxx
+    float4 x1 = x0 - i1 + C.xxxx;
+    float4 x2 = x0 - i2 + C.yyyy;
+    float4 x3 = x0 - i3 + C.zzzz;
+    float4 x4 = x0 + C.wwww;
 
-    if (t4 < 0.0) {
-        n4 = t4 = t24 = t44 = 0.0;
-    } else {
-        t24 = t4 * t4;
-        t44 = t24 * t24;
-        g4 = grad4(perm[ii+1+perm[jj+1+perm[kk+1+perm[ll+1]]]]);
-        n4 = t44 * dot( g4, v4 );
-    }
+    // Permutations
+    i = mod289(i);
+    float j0 = permute( permute( permute( permute(i.w) + i.z) + i.y) + i.x);
+    float4 j1 = permute( permute( permute( permute (
+                i.w + float4(i1.w, i2.w, i3.w, 1.0 ))
+            + i.z + float4(i1.z, i2.z, i3.z, 1.0 ))
+            + i.y + float4(i1.y, i2.y, i3.y, 1.0 ))
+            + i.x + float4(i1.x, i2.x, i3.x, 1.0 ));
 
-    noise = 27.0 * (n0 + n1 + n2 + n3 + n4);  
+    // Gradients: 7x7x6 points over a cube, mapped onto a 4-cross polytope
+    // 7*7*6 = 294, which is close to the ring size 17*17 = 289.
+    float4 ip = float4(1.0/294.0, 1.0/49.0, 1.0/7.0, 0.0) ;
 
-    d  = t20 * t0 * dot(g0,v0) * v0;
-    d += t21 * t1 * dot(g1,v1) * v1;
-    d += t22 * t2 * dot(g2,v2) * v2;
-    d += t23 * t3 * dot(g3,v3) * v3;
-    d += t24 * t4 * dot(g4,v4) * v4;
-    d *= -8.0;
+    float4 p0 = grad4(j0,   ip);
+    float4 p1 = grad4(j1.x, ip);
+    float4 p2 = grad4(j1.y, ip);
+    float4 p3 = grad4(j1.z, ip);
+    float4 p4 = grad4(j1.w, ip);
 
-    d.x += t40 * g0.x + t41 * g1.x + t42 * g2.x + t43 * g3.x + t44 * g4.x;
-    d.y += t40 * g0.y + t41 * g1.y + t42 * g2.y + t43 * g3.y + t44 * g4.y;
-    d.z += t40 * g0.z + t41 * g1.z + t42 * g2.z + t43 * g3.z + t44 * g4.z;
-    d.w += t40 * g0.w + t41 * g1.w + t42 * g2.w + t43 * g3.w + t44 * g4.w;
+    // Normalise gradients
+    float4 norm = taylorInvSqrt(float4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+    p0 *= norm.x;
+    p1 *= norm.y;
+    p2 *= norm.z;
+    p3 *= norm.w;
+    p4 *= taylorInvSqrt(dot(p4,p4));
 
-    d *= 28.0;
-  
-    return noise;
-      
+    // Mix contributions from the five corners
+    float3 m0 = max(0.6 - float3(dot(x0,x0), dot(x1,x1), dot(x2,x2)), 0.0);
+    float2 m1 = max(0.6 - float2(dot(x3,x3), dot(x4,x4)            ), 0.0);
+    m0 = m0 * m0;
+    m1 = m1 * m1;
+    return 49.0 * ( dot(m0*m0, float3( dot( p0, x0 ), dot( p1, x1 ), dot( p2, x2 )))
+                + dot(m1*m1, float2( dot( p3, x3 ), dot( p4, x4 ) ) ) ) ;
+
 }

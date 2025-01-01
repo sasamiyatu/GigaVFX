@@ -12,6 +12,7 @@ constexpr VkFormat LIGHT_RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr uint32_t MIN_SLICES = 1;
 constexpr uint32_t MAX_SLICES = 128;
 constexpr uint32_t LIGHT_RESOLUTION = 1024;
+constexpr float MAX_DELTA_TIME = 0.1f;
 
 static uint32_t get_dispatch_size(uint32_t particle_capacity)
 {
@@ -83,10 +84,10 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 			.set_blend_state({
 				VK_TRUE,
 				VK_BLEND_FACTOR_ONE,
-				VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+				VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,
 				VK_BLEND_OP_ADD,
 				VK_BLEND_FACTOR_ONE,
-				VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+				VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,
 				VK_BLEND_OP_ADD,
 				VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
 				})
@@ -350,7 +351,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& camera_state, glm::vec3 light_dir)
 {
-	static bool first = true;
+	dt = glm::clamp(dt, 0.0f, MAX_DELTA_TIME);
 	particles_to_spawn += particle_spawn_rate * dt;
 	time += dt;
 
@@ -391,6 +392,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		vmaUnmapMemory(ctx->allocator, system_globals.allocation);
 	}
 
+	static bool first = true;
 	if (!first)
 	{ // TODO: This performance timing stuff is probably incorrect when multiple frames are in flight
 		uint64_t query_results[4];
@@ -403,7 +405,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		double ns_render = ctx->physical_device.properties.limits.timestampPeriod * delta_render;
 		performance_timings.render_total = glm::mix(ns_render, performance_timings.render_total, 0.95);
 	}
-
 	first = false;
 
 	vkCmdResetQueryPool(cmd, query_pool, 0, 256);
@@ -459,6 +460,8 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.emitter_radius = emitter_radius;
 	push_constants.speed = particle_speed;
 	push_constants.time = time;
+	push_constants.lifetime = particle_lifetime;
+	push_constants.noise_scale = noise_scale;
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
@@ -786,8 +789,8 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target
 				render_pipeline_light->pipeline.descriptor_update_template, 
 				render_pipeline_light->pipeline.layout, 0, descriptor_info);
 
-			//glm::vec4 color = glm::vec4(glm::vec3(shadow_alpha), 1.0f);
-			glm::vec4 color = glm::vec4(glm::vec3(1.0f), shadow_alpha);
+			glm::vec4 color = glm::vec4(color_attenuation * shadow_alpha, 1.0f);
+			//glm::vec4 color = glm::vec4(glm::vec3(1.0f), shadow_alpha);
 			GPUParticlePushConstants pc{};
 			pc.particle_size = particle_size;
 			pc.particle_color = color;
@@ -877,14 +880,14 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target
 	{ // Clear light buffer
 		glm::vec3 light_color = glm::vec3(1.0f);
 		VkClearColorValue clear{};
-		//clear.float32[0] = 1.0f - light_color.r;
-		//clear.float32[1] = 1.0f - light_color.g;
-		//clear.float32[2] = 1.0f - light_color.b;
-		//clear.float32[3] = 0.0f;
-		clear.float32[0] = light_color.r;
-		clear.float32[1] = light_color.g;
-		clear.float32[2] = light_color.b;
+		clear.float32[0] = 1.0f - light_color.r;
+		clear.float32[1] = 1.0f - light_color.g;
+		clear.float32[2] = 1.0f - light_color.b;
 		clear.float32[3] = 0.0f;
+		//clear.float32[0] = light_color.r;
+		//clear.float32[1] = light_color.g;
+		//clear.float32[2] = light_color.b;
+		//clear.float32[3] = 0.0f;
 
 		VkImageSubresourceRange range{};
 		range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -987,8 +990,10 @@ void GPUParticleSystem::draw_ui()
 	ImGui::SliderFloat("emitter radius", &emitter_radius, 0.0f, 2.0f);
 	ImGui::SliderFloat("particle speed", &particle_speed, 0.0f, 5.0f);
 	ImGui::SliderFloat("particle size", &particle_size, 0.001f, 1.0f);
+	ImGui::SliderFloat("particle lifetime", &particle_lifetime, 0.0f, 20.0f);
 	ImGui::SliderFloat("particle alpha", &particle_color.a, 0.01f, 1.0f);
 	ImGui::ColorEdit3("particle color", glm::value_ptr(particle_color));
+	ImGui::SliderFloat("noise scale", &noise_scale, 0.0f, 3.0f);
 	ImGui::Checkbox("sort particles", &sort_particles);
 
 	if (ImGui::SliderScalar("number of slices", ImGuiDataType_U32, &num_slices, &MIN_SLICES, &MAX_SLICES))
@@ -1001,4 +1006,5 @@ void GPUParticleSystem::draw_ui()
 	}
 	ImGui::Checkbox("display single slice", &display_single_slice);
 	ImGui::SliderFloat("shadow alpha", &shadow_alpha, 0.0f, 1.0f);
+	ImGui::ColorEdit3("color attenuation", glm::value_ptr(color_attenuation));
 }

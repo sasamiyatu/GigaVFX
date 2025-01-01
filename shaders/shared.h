@@ -103,6 +103,8 @@ struct GPUParticlePushConstants
     float emitter_radius;
     float speed;
     float time;
+    float lifetime;
+    float noise_scale;
 };
 
 struct GPUParticleSystemGlobals

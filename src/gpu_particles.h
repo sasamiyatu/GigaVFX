@@ -53,6 +53,8 @@ struct GPUParticleSystem
     float particle_size = 0.1f; // World space
     glm::vec4 particle_color = glm::vec4(1.0f);
     glm::vec3 particle_sort_axis = glm::vec3(1.0f, 0.0f, 0.0f);
+    float particle_lifetime = 3.0f;
+    float noise_scale = 1.0f;
     bool sort_particles = true;
     uint32_t num_slices = 64;
     int slices_to_display = 64;
@@ -62,6 +64,7 @@ struct GPUParticleSystem
     float emitter_radius = 0.1f;
     float particle_speed = 1.0f;
     float time = 0.0f;
+    glm::vec3 color_attenuation = glm::vec3(1.0f);
 
     Texture particle_render_target;
     Texture light_render_target;

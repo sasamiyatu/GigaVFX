@@ -506,7 +506,7 @@ int main(int argc, char** argv)
             glm::mat4 shadow_projs[4];
             glm::mat4 shadow_views[4];
             glm::mat4 shadow_view_projs[4];
-            float distance_thresholds[4] = { 0.0f, 5.0, 15.0f, 45.0f };
+            float distance_thresholds[4] = { 0.0f, 5.0f, 15.0f, 45.0f };
             memcpy(glm::value_ptr(globals.shadow_cascade_thresholds), distance_thresholds, sizeof(distance_thresholds));
             for (int i = 0; i < 4; ++i)
             {
