@@ -101,6 +101,7 @@ struct GPUParticlePushConstants
     float particle_size;
     uint num_slices;
     float emitter_radius;
+    float speed;
 };
 
 struct GPUParticleSystemGlobals

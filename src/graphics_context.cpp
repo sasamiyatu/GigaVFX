@@ -93,6 +93,7 @@ void Context::init(int window_width, int window_height)
     VkPhysicalDeviceVulkan13Features vulkan_13_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     vulkan_13_features.dynamicRendering = VK_TRUE;
     vulkan_13_features.synchronization2 = VK_TRUE;
+    vulkan_13_features.shaderDemoteToHelperInvocation = VK_TRUE;
 
     VkPhysicalDeviceVulkan12Features vulkan_12_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
     vulkan_12_features.bufferDeviceAddress = VK_TRUE;

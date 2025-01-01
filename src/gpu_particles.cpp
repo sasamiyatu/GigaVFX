@@ -53,19 +53,6 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		render_pipeline_back_to_front = new GraphicsPipelineAsset(builder);
 		AssetCatalog::register_asset(render_pipeline_back_to_front);
 
-		builder.set_blend_state({
-			VK_TRUE,
-			VK_BLEND_FACTOR_ONE,
-			VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,
-			VK_BLEND_OP_ADD,
-			VK_BLEND_FACTOR_ONE,
-			VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,
-			VK_BLEND_OP_ADD,
-			VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
-		});
-
-
-
 		// "Under" operator
 		builder.set_blend_state({
 			VK_TRUE,
@@ -96,10 +83,10 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 			.set_blend_state({
 				VK_TRUE,
 				VK_BLEND_FACTOR_ONE,
-				VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,
+				VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
 				VK_BLEND_OP_ADD,
 				VK_BLEND_FACTOR_ONE,
-				VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,
+				VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
 				VK_BLEND_OP_ADD,
 				VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
 				})
@@ -467,6 +454,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.sort_axis = particle_sort_axis;
 	push_constants.blas_address = VkHelpers::get_acceleration_structure_device_address(ctx->device, blas.acceleration_structure);
 	push_constants.emitter_radius = emitter_radius;
+	push_constants.speed = particle_speed;
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
@@ -794,7 +782,8 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target
 				render_pipeline_light->pipeline.descriptor_update_template, 
 				render_pipeline_light->pipeline.layout, 0, descriptor_info);
 
-			glm::vec4 color = glm::vec4(glm::vec3(shadow_alpha), 1.0f);
+			//glm::vec4 color = glm::vec4(glm::vec3(shadow_alpha), 1.0f);
+			glm::vec4 color = glm::vec4(glm::vec3(1.0f), shadow_alpha);
 			GPUParticlePushConstants pc{};
 			pc.particle_size = particle_size;
 			pc.particle_color = color;
@@ -884,9 +873,13 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target
 	{ // Clear light buffer
 		glm::vec3 light_color = glm::vec3(1.0f);
 		VkClearColorValue clear{};
-		clear.float32[0] = 1.0f - light_color.r;
-		clear.float32[1] = 1.0f - light_color.g;
-		clear.float32[2] = 1.0f - light_color.b;
+		//clear.float32[0] = 1.0f - light_color.r;
+		//clear.float32[1] = 1.0f - light_color.g;
+		//clear.float32[2] = 1.0f - light_color.b;
+		//clear.float32[3] = 0.0f;
+		clear.float32[0] = light_color.r;
+		clear.float32[1] = light_color.g;
+		clear.float32[2] = light_color.b;
 		clear.float32[3] = 0.0f;
 
 		VkImageSubresourceRange range{};
@@ -987,7 +980,8 @@ void GPUParticleSystem::draw_ui()
 	{
 		particle_spawn_rate = std::clamp(particle_spawn_rate, 0.0f, 10000000.0f);
 	}
-	ImGui::SliderFloat("emitter radius", &emitter_radius, 0.0f, 100.0f);
+	ImGui::SliderFloat("emitter radius", &emitter_radius, 0.0f, 2.0f);
+	ImGui::SliderFloat("particle speed", &particle_speed, 0.0f, 5.0f);
 	ImGui::SliderFloat("particle size", &particle_size, 0.001f, 1.0f);
 	ImGui::SliderFloat("particle alpha", &particle_color.a, 0.01f, 1.0f);
 	ImGui::ColorEdit3("particle color", glm::value_ptr(particle_color));
