@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "simplex_noise.hlsli"
 #include "random.hlsli"
 
 float3 hash(uint3 x)
@@ -90,14 +91,24 @@ float4 gradient_noise_deriv( in float3 x )
 
 // [Bridson et al. 2007, Curl-Noise for Procedural Fluid Flow]
 // https://www.cs.ubc.ca/~rbridson/docs/bridson-siggraph2007-curlnoise.pdf
-float3 curl_noise(float3 x)
+float3 curl_noise(float3 x, float t)
 {
+#if 0
      // Derivatives of gradient noise
      float3 psi1 = gradient_noise_deriv(x).yzw;
      float3 psi2 = gradient_noise_deriv(x + float3(123.2213, -1053.4, 60421.62)).yzw;
      float3 psi3 = gradient_noise_deriv(x + float3(-9591.4, 1053.12, -7123.95)).yzw;
 
      float3 curl = float3(psi3.y - psi2.z, psi1.z - psi3.x, psi2.x - psi1.y);
+#else
+     float4 psi1, psi2, psi3;
+     simplex_noise_4d(float4(x, t), psi1);
+     simplex_noise_4d(float4(x + float3(123.2213, -1053.4, 60421.62), t), psi2);
+     simplex_noise_4d(float4(x + float3(-9591.4, 1053.12, -7123.95), t), psi3);
+
+     float3 curl = float3(psi3.y - psi2.z, psi1.z - psi3.x, psi2.x - psi1.y);
+#endif
+
 
      return curl;
 }

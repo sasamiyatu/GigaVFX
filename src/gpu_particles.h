@@ -61,6 +61,7 @@ struct GPUParticleSystem
     bool draw_order_flipped = false;
     float emitter_radius = 0.1f;
     float particle_speed = 1.0f;
+    float time = 0.0f;
 
     Texture particle_render_target;
     Texture light_render_target;

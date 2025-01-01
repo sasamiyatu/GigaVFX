@@ -352,6 +352,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 {
 	static bool first = true;
 	particles_to_spawn += particle_spawn_rate * dt;
+	time += dt;
 
 	glm::vec3 view_dir = -camera_state.forward;
 	glm::vec3 half_vector;
@@ -443,6 +444,8 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		DescriptorInfo(instances_buffer.buffer),
 		DescriptorInfo(tlas.acceleration_structure),
 		DescriptorInfo(indirect_draw_buffer.buffer),
+		DescriptorInfo(light_sampler),
+		DescriptorInfo(light_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
 	};
 
 	// Likewise for push constants
@@ -455,6 +458,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.blas_address = VkHelpers::get_acceleration_structure_device_address(ctx->device, blas.acceleration_structure);
 	push_constants.emitter_radius = emitter_radius;
 	push_constants.speed = particle_speed;
+	push_constants.time = time;
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);

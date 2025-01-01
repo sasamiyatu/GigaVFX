@@ -71,7 +71,8 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
-        p.velocity = curl_noise(p.position) * push_constants.speed;
+        p.velocity = curl_noise(p.position, push_constants.time * 0.1) * push_constants.speed;
+        if (thread_id.x == 0) printf("v: %f %f %f, t: %f", p.velocity.x, p.velocity.y, p.velocity.z, push_constants.time);
         uint4 seed = uint4(globals.frame_index, asuint(p.position));
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
