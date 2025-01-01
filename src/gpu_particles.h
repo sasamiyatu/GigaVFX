@@ -12,7 +12,7 @@ struct AccelerationStructure
 
 struct GPUParticleSystem
 {
-    void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity);
+    void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, const Texture& shadowmap_texture);
     void simulate(VkCommandBuffer cmd, float dt, struct CameraState& camera_state, glm::vec3 light_dir);
     void render(VkCommandBuffer cmd, const Texture& render_target, const Texture& depth_target);
     void destroy();
@@ -66,6 +66,7 @@ struct GPUParticleSystem
     float particle_speed = 0.5f;
     float time = 0.0f;
     glm::vec3 color_attenuation = glm::vec3(1.0f);
+    uint32_t light_buffer_size;
 
     Texture particle_render_target;
     Texture light_render_target;
@@ -77,6 +78,8 @@ struct GPUParticleSystem
     Buffer particle_aabbs = {}; // Acceleration structure input
     AccelerationStructure tlas = {};
     Buffer instances_buffer = {};
+
+    VkImageView light_depth_view = VK_NULL_HANDLE;
 
     struct
     {

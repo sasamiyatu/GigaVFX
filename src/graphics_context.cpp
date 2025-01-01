@@ -578,6 +578,9 @@ bool Context::create_texture(Texture& texture, uint32_t width, uint32_t height, 
     texture.image = image;
     texture.layout = VK_IMAGE_LAYOUT_UNDEFINED;
     texture.view = view;
+    texture.format = format;
+    texture.width = width;
+    texture.height = height;
 
     return true;
 }

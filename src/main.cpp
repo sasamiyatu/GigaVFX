@@ -39,10 +39,9 @@
 
 constexpr uint32_t WINDOW_WIDTH = 1280;
 constexpr uint32_t WINDOW_HEIGHT = 720;
-
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
-
 constexpr VkFormat RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
+constexpr uint32_t DEPTH_TEXTURE_SIZE = 2048;
 
 Context ctx;
 
@@ -205,18 +204,18 @@ int main(int argc, char** argv)
         VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &point_sampler));
     }
 
-    Texture depth_texture;
+    Texture depth_texture{};
     ctx.create_texture(depth_texture, WINDOW_WIDTH, WINDOW_HEIGHT, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
 
-    Texture shadowmap_texture;
-    ctx.create_texture(shadowmap_texture, 2048, 2048, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1, 4);
+    Texture shadowmap_texture{};
+    ctx.create_texture(shadowmap_texture, DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1, 4);
 
-    Texture hdr_render_target;
+    Texture hdr_render_target{};
     ctx.create_texture(hdr_render_target, WINDOW_WIDTH, WINDOW_HEIGHT, 1, RENDER_TARGET_FORMAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
 
 
     GraphicsPipelineAsset* depth_prepass = nullptr;
-    {
+    { // Depth prepass pipeline
         GraphicsPipelineBuilder pipeline_builder(ctx.device, true);
         pipeline_builder.set_vertex_shader_filepath("depth_prepass.hlsl")
             .set_fragment_shader_filepath("depth_prepass.hlsl")
@@ -330,7 +329,7 @@ int main(int argc, char** argv)
     constexpr uint32_t particle_capacity = 1048576;
     //constexpr uint32_t particle_capacity = 8;
     GPUParticleSystem gpu_particle_system;
-    gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity);
+    gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity, depth_texture);
 
     std::vector<MeshInstance> mesh_draws;
 
@@ -643,14 +642,14 @@ int main(int argc, char** argv)
             depth_info.clearValue.depthStencil.depth = 1.0f;
 
             VkRenderingInfo rendering_info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
-            rendering_info.renderArea = { {0, 0}, {2048, 2048} };
+            rendering_info.renderArea = { {0, 0}, {DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE} };
             rendering_info.layerCount = 4;
             rendering_info.viewMask = 0b1111;
             rendering_info.pDepthAttachment = &depth_info;
 
-            VkRect2D scissor = { {0, 0}, {2048, 2048} };
+            VkRect2D scissor = { {0, 0}, {DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE} };
             vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-            VkViewport viewport = { 0.0f, (float)2048, (float)2048, -(float)2048, 0.0f, 1.0f };
+            VkViewport viewport = { 0.0f, (float)DEPTH_TEXTURE_SIZE, (float)DEPTH_TEXTURE_SIZE, -(float)DEPTH_TEXTURE_SIZE, 0.0f, 1.0f };
             vkCmdSetViewport(command_buffer, 0, 1, &viewport);
 
             vkCmdBeginRendering(command_buffer, &rendering_info);
