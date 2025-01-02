@@ -64,7 +64,7 @@ float snoise(float4 v)
                         -0.447213595499958); // -1 + 4 * G4
 
     // First corner
-    float4 i  = floor(v + dot(v, F4.xxxx) );
+    float4 i  = floor(v + dot(v, F4.xxxx) );        
     float4 x0 = v -   i + dot(i, C.xxxx);
 
     // Other corners

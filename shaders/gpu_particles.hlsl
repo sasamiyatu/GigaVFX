@@ -217,7 +217,10 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
 void cs_debug_print_sorted_particles( uint3 thread_id : SV_DispatchThreadID )
 {
     uint count = particle_system_state_out[0].active_particle_count;
-    printf("active count %d, sort_axis: (%f, %f, %f)\n", count, push_constants.sort_axis);
+    printf("active count %d, sort_axis: (%f, %f, %f)\n", count, 
+        push_constants.sort_axis.x,
+        push_constants.sort_axis.y,
+        push_constants.sort_axis.z);
 
     printf("Unsorted");
     for (uint i = 0; i < count; ++i)
@@ -244,10 +247,7 @@ struct VSInput
 struct VSOutput
 {
     float4 position: SV_Position;
-    float2 center_pos: POSITION0;
-    float3 world_pos: POSITION1;
     [[vk::builtin("PointSize")]] float point_size : PSIZE;
-    float frag_point_size : TEXCOORD1;
     float3 shadow : COLOR0;
 };
 
@@ -260,7 +260,6 @@ VSOutput vs_main(VSInput input)
     float4 pos = mul(system_globals.transform, float4(p.position, 1.0));
     float4 view_pos = mul(globals.view, pos);
     output.position = mul(globals.projection, view_pos);
-    output.center_pos = output.position.xy / output.position.w;
 
     //printf("wpos vs: %f %f %f", pos);
     const float particle_size = push_constants.particle_size;
@@ -272,13 +271,12 @@ VSOutput vs_main(VSInput input)
     float4 light_clip = mul(system_globals.light_proj, light_view);
     light_clip /= light_clip.w;
     float2 light_uv = light_clip.xy * 0.5 + 0.5;
+    light_uv.y = 1.0 - light_uv.y;
     float4 light_sample = light_texture.SampleLevel(light_sampler, light_uv, 0);
     //float3 shadow = 1.0 - light_sample.a * 0.75;
     float3 shadow = 1.0 - light_sample.rgb;
 
     output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
-    output.frag_point_size = output.point_size;
-    output.world_pos = pos.xyz;
     output.shadow = shadow;
     return output;
 }
@@ -292,7 +290,6 @@ VSOutput vs_light(VSInput input)
     float4 pos = mul(system_globals.transform, float4(p.position, 1.0));
     float4 view_pos = mul(system_globals.light_view, pos);
     output.position = mul(system_globals.light_proj, view_pos);
-    output.center_pos = output.position.xy / output.position.w;
 
     const float particle_size = push_constants.particle_size;
     float4 corner = float4(particle_size * 0.5, particle_size * 0.5, view_pos.z, 1.0);
@@ -300,8 +297,6 @@ VSOutput vs_light(VSInput input)
     float point_size = system_globals.light_resolution.x * proj_corner.x / proj_corner.w;
 
     output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
-    output.frag_point_size = output.point_size;
-    output.world_pos = pos.xyz;
 
     return output;
 }
@@ -309,9 +304,6 @@ VSOutput vs_light(VSInput input)
 struct PSInput
 {
     float4 position: SV_Position;
-    float2 center_pos: POSITION0;
-    float3 world_pos: POSITION1;
-    float frag_point_size : TEXCOORD1;
     float3 shadow : COLOR0;
 };
 
@@ -327,15 +319,12 @@ PSOutput particle_fs_light(PSInput input)
 {
     PSOutput output = (PSOutput)0;
 
-    float2 center_pos = (input.center_pos * 0.5 + 0.5) * system_globals.light_resolution;
-
     float dist = distance(gl_PointCoord.xy, float2(0.5, 0.5));
     if (dist > 0.5) discard;
 
     float alpha = saturate(1.0 - dist * 2.0);
     float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
     
-    //output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
     output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
 
     return output;

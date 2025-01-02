@@ -18,7 +18,7 @@ static uint32_t get_dispatch_size(uint32_t particle_capacity)
 	return (particle_capacity + 63) / 64;
 }
 
-void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, const Texture& shadowmap_texture)
+void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, const Texture& shadowmap_texture, uint32_t cascade_index)
 {
 	assert(shadowmap_texture.width != 0);
 
@@ -27,15 +27,8 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 	this->particle_capacity = particle_capacity;
 	this->light_buffer_size = shadowmap_texture.width;
 
-	{
+	{ // Create image view for shadow map
 		VkImageViewCreateInfo cinfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-		const void* pNext;
-		VkImageViewCreateFlags     flags;
-		VkImage                    image;
-		VkImageViewType            viewType;
-		VkFormat                   format;
-		VkComponentMapping         components;
-		VkImageSubresourceRange    subresourceRange;
 		cinfo.image = shadowmap_texture.image;
 		cinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
 		cinfo.format = shadowmap_texture.format;
@@ -44,7 +37,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		cinfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
 		cinfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
 		cinfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-		cinfo.subresourceRange.baseArrayLayer = 0;
+		cinfo.subresourceRange.baseArrayLayer = cascade_index;
 		cinfo.subresourceRange.baseMipLevel = 0;
 		cinfo.subresourceRange.layerCount = 1;
 		cinfo.subresourceRange.levelCount = 1;
@@ -104,10 +97,10 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 			.set_fragment_shader_filepath("gpu_particles.hlsl", "particle_fs_light")
 			.set_cull_mode(VK_CULL_MODE_NONE)
 			.add_color_attachment(LIGHT_RENDER_TARGET_FORMAT)
-			//.set_depth_format(VK_FORMAT_D32_SFLOAT)
-			//.set_depth_test(VK_FALSE)
-			//.set_depth_write(VK_FALSE)
-			//.set_depth_compare_op(VK_COMPARE_OP_LESS)
+			.set_depth_format(VK_FORMAT_D32_SFLOAT)
+			.set_depth_test(VK_TRUE)
+			.set_depth_write(VK_FALSE)
+			.set_depth_compare_op(VK_COMPARE_OP_LESS)
 			.set_blend_state({
 				VK_TRUE,
 				VK_BLEND_FACTOR_ONE,
@@ -376,12 +369,13 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 	}
 }
 
-void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& camera_state, glm::vec3 light_dir)
+void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& camera_state, glm::mat4 shadow_view, glm::mat4 shadow_projection)
 {
 	dt = glm::clamp(dt, 0.0f, MAX_DELTA_TIME);
 	particles_to_spawn += particle_spawn_rate * dt;
 	time += dt;
 
+	glm::vec3 light_dir = glm::vec3(glm::inverse(shadow_view)[2]);
 	glm::vec3 view_dir = -camera_state.forward;
 	glm::vec3 half_vector;
 	float dp = glm::dot(view_dir, light_dir);
@@ -406,11 +400,11 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		globals.particle_capacity = particle_capacity;
 		globals.transform = glm::mat4(1.0f);
 
-		glm::mat4 shadow_proj = glm::ortho(-3.0f, 3.0f, -3.0f, 3.0f, 0.1f, 100.0f);
+		//glm::mat4 shadow_proj = glm::ortho(-3.0f, 3.0f, -3.0f, 3.0f, 0.1f, 100.0f);
 		glm::vec3 center = glm::vec3(0.0f);
-		glm::mat4 shadow_view = glm::lookAt(center + light_dir * 50.0f, center, glm::vec3(0.0f, 1.0f, 0.0));
+		//glm::mat4 shadow_view = glm::lookAt(center + light_dir * 50.0f, center, glm::vec3(0.0f, 1.0f, 0.0));
 		globals.light_view = shadow_view;
-		globals.light_proj = shadow_proj;
+		globals.light_proj = shadow_projection;
 		globals.light_resolution = glm::uvec2(light_buffer_size, light_buffer_size);
 
 		void* mapped;
@@ -790,13 +784,14 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target
 			rendering_info.viewMask = 0;
 			rendering_info.colorAttachmentCount = 1;
 			rendering_info.pColorAttachments = &color_info;
-			//rendering_info.pDepthAttachment = &depth_info;
+			rendering_info.pDepthAttachment = &depth_info;
 
 			vkCmdBeginRendering(cmd, &rendering_info);
 
 			VkRect2D scissor = { {0, 0}, {light_buffer_size, light_buffer_size} };
 			vkCmdSetScissor(cmd, 0, 1, &scissor);
-			VkViewport viewport = { 0.0f, 0.0f, (float)light_buffer_size, light_buffer_size, 0.0f, 1.0f };
+			VkViewport viewport = { 0.0f, (float)light_buffer_size, (float)light_buffer_size, -(float)light_buffer_size, 0.0f, 1.0f };
+			//VkViewport viewport = { 0.0f, 0.0f, (float)light_buffer_size, (float)light_buffer_size, 0.0f, 1.0f };
 			vkCmdSetViewport(cmd, 0, 1, &viewport);
 
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline_light->pipeline.pipeline);
@@ -928,9 +923,9 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target
 
 	for (uint32_t i = 0; i < slices_to_display; ++i)
 	{
-		render_slice_view(i, draw_order_flipped);
-		VkHelpers::full_barrier(cmd);
 		render_slice_light(i);
+		VkHelpers::full_barrier(cmd);
+		render_slice_view(i, draw_order_flipped);
 		VkHelpers::full_barrier(cmd);
 	}
 

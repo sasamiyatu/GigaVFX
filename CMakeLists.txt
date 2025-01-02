@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(Gigasticle VERSION 0.0.1 LANGUAGES C CXX)
+project(GigaVFX VERSION 0.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,56 +11,9 @@ set(SDL2_DIR ${VULKAN_SDK_DIR}/cmake)
 find_package(Vulkan REQUIRED volk dxc)
 find_package(SDL2 REQUIRED)
 
-#===========================================================================================
-# WGSL Shader precompilation
-#
-# Shaders are first from HLSL to Spir-V using DirectX Shader Compiler (DXC)
-# Generated Spir-V is then transpiled into WGSL using Google's Tint shader compiler
-# The generated WGSL shaders are embedded into the program using CMakeRC
-# (https://github.com/vector-of-bool/cmrc)
-#==========================================================================================
-
-OPTION(WEBGPU_USE_PRECOMPILED_SHADERS "Use precompiled shaders when building for WebGPU" OFF)
-
-if(WEBGPU_USE_PRECOMPILED_SHADERS)
-    add_compile_definitions(USE_PRECOMPILED_SHADERS)
-endif()
-
-
-find_program(DXC dxc REQUIRED PATHS ${VULKAN_SDK_DIR}/Bin NO_DEFAULT_PATH)
-message(${DXC})
-include(CMakeRC.cmake)
-
-set(COMPILED_SHADERS)
-function(compile_shader src_file type entry_point)
-    get_filename_component(OUTPUT_FILE_WE ${src_file} NAME_WE)
-    set(OUTPUT_SPV_FILE ${CMAKE_SOURCE_DIR}/shaders/generated/${OUTPUT_FILE_WE}_${type}.spv)
-    set(SOURCE_FILE ${CMAKE_SOURCE_DIR}/${src_file})
-    add_custom_command(
-        OUTPUT ${OUTPUT_SPV_FILE}
-        COMMAND ${DXC} ARGS -E ${entry_point} -T ${type} -Zs -spirv -O0 -Fo ${OUTPUT_SPV_FILE} ${SOURCE_FILE}
-        DEPENDS ${SOURCE_FILE}
-        VERBATIM
-    )
-    set(COMPILED_SHADERS ${COMPILED_SHADERS} ${OUTPUT_SPV_FILE} PARENT_SCOPE)
-    list(APPEND SHADER_SOURCES ${SOURCE_FILE})
-endfunction()
-
-compile_shader(shaders/triangle.hlsl vs_6_6 vs_main)
-compile_shader(shaders/triangle.hlsl ps_6_6 fs_main)
-compile_shader(shaders/forward.hlsl vs_6_6 vs_main)
-compile_shader(shaders/forward.hlsl ps_6_6 fs_main)
-compile_shader(shaders/procedural_sky.hlsl cs_6_6 cs_main)
-
 add_subdirectory(external/vk-radix-sort)
 
-cmrc_add_resource_library(embedded_shaders ALIAS Shaders::precompiled
-    WHENCE shaders/generated
-    PREFIX shaders/
-    ${COMPILED_SHADERS}
-)
-
-add_executable(gigasticle
+add_executable(gigavfx
     src/buffer.h
     src/camera.h
     src/cgltf.h
@@ -120,18 +73,12 @@ add_executable(gigasticle
     src/imgui/imgui_demo.cpp
 )
 
-target_include_directories(gigasticle PUBLIC ${Vulkan_INCLUDE_DIRS})
+target_include_directories(gigavfx PUBLIC ${Vulkan_INCLUDE_DIRS})
 
-add_custom_target(shader_compilation ALL DEPENDS ${COMPILED_SHADERS})
-target_link_libraries(gigasticle PUBLIC Shaders::precompiled)
 
-#===========================================================================================
-# End shader stuff
-#===========================================================================================
-
-target_link_libraries(gigasticle PUBLIC SDL2::SDL2 Vulkan::dxc_lib Vulkan::volk vk-radix-sort)
+target_link_libraries(gigavfx PUBLIC SDL2::SDL2 Vulkan::dxc_lib Vulkan::volk vk-radix-sort)
 set_target_properties(
-    gigasticle
+    gigavfx
     PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )

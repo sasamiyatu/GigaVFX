@@ -110,6 +110,7 @@ void Context::init(int window_width, int window_height)
     VkPhysicalDeviceFeatures features{};
     features.shaderInt64 = VK_TRUE;
     features.samplerAnisotropy = VK_TRUE;
+    features.vertexPipelineStoresAndAtomics = VK_TRUE;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration_structure_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
     acceleration_structure_features.accelerationStructure = VK_TRUE;

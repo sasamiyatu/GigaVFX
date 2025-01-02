@@ -329,7 +329,7 @@ int main(int argc, char** argv)
     constexpr uint32_t particle_capacity = 1048576;
     //constexpr uint32_t particle_capacity = 8;
     GPUParticleSystem gpu_particle_system;
-    gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity, depth_texture);
+    gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity, shadowmap_texture, 1);
 
     std::vector<MeshInstance> mesh_draws;
 
@@ -504,6 +504,9 @@ int main(int argc, char** argv)
             }
         }
 
+        glm::mat4 shadow_projs[4];
+        glm::mat4 shadow_views[4];
+        glm::mat4 shadow_view_projs[4];
         { // Update global uniform buffer
             ShaderGlobals globals{};
             globals.view = glm::lookAt(camera.position, camera.position + camera.forward, camera.up);
@@ -519,9 +522,7 @@ int main(int argc, char** argv)
 
             glm::vec4 origin_shift[4];
             float max_distance = 100.0f;
-            glm::mat4 shadow_projs[4];
-            glm::mat4 shadow_views[4];
-            glm::mat4 shadow_view_projs[4];
+
             float distance_thresholds[4] = { 0.0f, 5.0f, 15.0f, 45.0f };
             memcpy(glm::value_ptr(globals.shadow_cascade_thresholds), distance_thresholds, sizeof(distance_thresholds));
             for (int i = 0; i < 4; ++i)
@@ -552,7 +553,7 @@ int main(int argc, char** argv)
                 shadow_origin /= shadow_origin.w;
                 float step = 1.0f / 1024.0f;
                 glm::vec2 rounded = glm::round(glm::vec2(shadow_origin) / step) * step;
-                globals.shadow_view_projection[i] = glm::translate(glm::mat4(1.0f), glm::vec3(rounded.x - shadow_origin.x, rounded.y - shadow_origin.y, 0.0f)) * globals.shadow_view_projection[i];
+                //globals.shadow_view_projection[i] = glm::translate(glm::mat4(1.0f), glm::vec3(rounded.x - shadow_origin.x, rounded.y - shadow_origin.y, 0.0f)) * globals.shadow_view_projection[i];
             }
 
             void* mapped;
@@ -694,7 +695,7 @@ int main(int argc, char** argv)
         }
 
         // Where is the correct spot for this?
-        gpu_particle_system.simulate(command_buffer, (float)delta_time, camera, sundir);
+        gpu_particle_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
 
         { // Depth prepass
             VkRenderingAttachmentInfo depth_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
