@@ -776,6 +776,8 @@ int main(int argc, char** argv)
             vkCmdPipelineBarrier2(command_buffer, &dependency_info);
         }
 
+        gpu_particle_system.render(command_buffer, depth_texture);
+
         { // Forward pass
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             color_info.imageView = hdr_render_target.view;
@@ -816,6 +818,7 @@ int main(int argc, char** argv)
                 DescriptorInfo(shadowmap_texture.view, VK_IMAGE_LAYOUT_GENERAL),
                 DescriptorInfo(shadow_sampler),
                 DescriptorInfo(point_sampler),
+                DescriptorInfo(gpu_particle_system.light_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
             };
 
             vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, pipeline->pipeline.descriptor_update_template, pipeline->pipeline.layout, 0, descriptor_info);
@@ -847,8 +850,7 @@ int main(int argc, char** argv)
 
         vkCmdEndRendering(command_buffer);
 
-        gpu_particle_system.render(command_buffer, hdr_render_target, depth_texture);
-
+        gpu_particle_system.composite(command_buffer, hdr_render_target);
 
 #if 0
         DescriptorInfo desc_info[] = {

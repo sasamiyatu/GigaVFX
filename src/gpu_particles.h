@@ -15,7 +15,8 @@ struct GPUParticleSystem
     void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, 
         const Texture& shadowmap_texture, uint32_t cascade_index);
     void simulate(VkCommandBuffer cmd, float dt, struct CameraState& camera_state, glm::mat4 shadow_view, glm::mat4 shadow_projection);
-    void render(VkCommandBuffer cmd, const Texture& render_target, const Texture& depth_target);
+    void render(VkCommandBuffer cmd, const Texture& depth_target);
+    void composite(VkCommandBuffer cmd, const Texture& render_target);
     void destroy();
     void draw_stats_overlay();
     void draw_ui(); // Draws into the currently active imgui window

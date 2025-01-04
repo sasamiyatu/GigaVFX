@@ -31,6 +31,7 @@ struct VSOutput
 [[vk::binding(3)]] Texture2DArray shadowmap_texture;
 [[vk::binding(4)]] SamplerComparisonState shadow_sampler;
 [[vk::binding(5)]] SamplerState point_sampler;
+[[vk::binding(6)]] Texture2D particle_light_texture;
 
 [[vk::push_constant]]
 PushConstantsForward push_constants;
@@ -141,7 +142,8 @@ PSOutput fs_main(VSOutput input)
     // Diffuse BRDF
     float3 Fd = material_context.basecolor.rgb / PI * (1.0 - F);
 
-    float shadow = 1.0;
+    // Particles can cast colored shadows
+    float3 shadow = 1.0;
 
     const float3 cascade_colors[4] = {float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(1.0, 0.0, 1.0)};
 #if 1
@@ -192,6 +194,18 @@ PSOutput fs_main(VSOutput input)
             shd /= float(PCF_NUM_SAMPLES);
             shadow = shd;
 #endif
+        }
+
+        if (any(shadow > 0.0))
+        { // Particle shadows
+            uint cascade = 1; // Particles use first cascade only
+            float4 shadow_space = mul(globals.shadow_view_projection[cascade], float4(input.world_position, 1.0));
+            shadow_space.xyz /= shadow_space.w;
+            float2 shadow_uv = shadow_space.xy * 0.5 + 0.5;
+            shadow_uv.y = 1.0 - shadow_uv.y;
+
+            float4 light = particle_light_texture.Sample(bilinear_sampler, shadow_uv);
+            shadow *= 1.0 - light.rgb;
         }
     }
 

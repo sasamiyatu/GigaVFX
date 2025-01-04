@@ -717,7 +717,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	std::swap(particle_buffer[0], particle_buffer[1]);
 }
 
-void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target, const Texture& depth_target)
+void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 {
 	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, query_pool, 2);
 
@@ -929,6 +929,11 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target
 		VkHelpers::full_barrier(cmd);
 	}
 
+	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool, 3);
+}
+
+void GPUParticleSystem::composite(VkCommandBuffer cmd, const Texture& render_target)
+{
 	{ // Composite
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_composite_pipeline->pipeline.pipeline);
 		DescriptorInfo descriptor_info[] = {
@@ -951,8 +956,6 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& render_target
 			0, nullptr,
 			0, nullptr);
 	}
-
-	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool, 3);
 }
 
 void GPUParticleSystem::destroy()
@@ -1007,7 +1010,7 @@ void GPUParticleSystem::draw_stats_overlay()
 
 void GPUParticleSystem::draw_ui()
 {
-	if (ImGui::InputFloat("emission rate", &particle_spawn_rate, 1.0f, 100.0f))
+	if (ImGui::InputFloat("emission rate", &particle_spawn_rate, 100.0f, 10000.0f))
 	{
 		particle_spawn_rate = std::clamp(particle_spawn_rate, 0.0f, 10000000.0f);
 	}
