@@ -102,17 +102,46 @@ float3 curl_noise(float3 x, float t)
 
      float3 curl = float3(psi3.y - psi2.z, psi1.z - psi3.x, psi2.x - psi1.y);
 #else
-     float4 x1 = float4(x, t);
-     float4 x2 = float4(x + float3(123.2213, -1053.4, 60421.62), t);
-     float4 x3 = float4(x + float3(-9591.4, 1053.12, -7123.95), t);
+     const int n_octaves = 3;
+     float w_sum = 0;
+     float weight = 1.0;
+     float frequency = 1.0;
 
-     const float epsilon = 1e-3f;
-     float dp3dy = (snoise(x3 + float4(0, 1, 0, 0) * epsilon) - snoise(x3)) / epsilon;
-     float dp2dz = (snoise(x2 + float4(0, 0, 1, 0) * epsilon) - snoise(x2)) / epsilon;
-     float dp1dz = (snoise(x1 + float4(0, 0, 1, 0) * epsilon) - snoise(x1)) / epsilon;
-     float dp3dx = (snoise(x3 + float4(1, 0, 0, 0) * epsilon) - snoise(x3)) / epsilon;
-     float dp2dx = (snoise(x2 + float4(1, 0, 0, 0) * epsilon) - snoise(x2)) / epsilon;
-     float dp1dy = (snoise(x1 + float4(0, 1, 0, 0) * epsilon) - snoise(x1)) / epsilon;
+     float dp3dy = 0; 
+     float dp2dz = 0; 
+     float dp1dz = 0; 
+     float dp3dx = 0; 
+     float dp2dx = 0; 
+     float dp1dy = 0; 
+
+     for (int i = 0; i < n_octaves; ++i)
+     {
+          float4 x1 = float4(x, t);
+          x1.xyz *= frequency;
+          float4 x2 = float4(x + float3(123.2213, -1053.4, 60421.62), t);
+          x2.xyz *= frequency;
+          float4 x3 = float4(x + float3(-9591.4, 1053.12, -7123.95), t);
+          x3.xyz *= frequency;
+
+          const float epsilon = 1e-3f;
+          dp3dy += weight * (snoise(x3 + float4(0, 1, 0, 0) * epsilon) - snoise(x3)) / epsilon;
+          dp2dz += weight * (snoise(x2 + float4(0, 0, 1, 0) * epsilon) - snoise(x2)) / epsilon;
+          dp1dz += weight * (snoise(x1 + float4(0, 0, 1, 0) * epsilon) - snoise(x1)) / epsilon;
+          dp3dx += weight * (snoise(x3 + float4(1, 0, 0, 0) * epsilon) - snoise(x3)) / epsilon;
+          dp2dx += weight * (snoise(x2 + float4(1, 0, 0, 0) * epsilon) - snoise(x2)) / epsilon;
+          dp1dy += weight * (snoise(x1 + float4(0, 1, 0, 0) * epsilon) - snoise(x1)) / epsilon;
+
+          w_sum += weight;
+          frequency *= 2.0;
+          weight *= 0.5;
+     }
+
+     dp3dy /= w_sum; 
+     dp2dz /= w_sum; 
+     dp1dz /= w_sum; 
+     dp3dx /= w_sum; 
+     dp2dx /= w_sum; 
+     dp1dy /= w_sum; 
 
      float3 curl = float3(dp3dy - dp2dz, dp1dz - dp3dx, dp2dx - dp1dy);
 #endif

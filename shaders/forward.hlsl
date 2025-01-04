@@ -146,23 +146,10 @@ PSOutput fs_main(VSOutput input)
     float3 shadow = 1.0;
 
     const float3 cascade_colors[4] = {float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(1.0, 0.0, 1.0)};
-#if 1
+    
     float view_z = abs(input.view_position.z);
     float cascade = dot(globals.shadow_cascade_thresholds < view_z, 1.0) - 1.0;
-#else
-    float cascade = 3.0;
-    for (int i = 0; i < 4; ++i)
-    {
-        float4 shadow_space = mul(globals.shadow_view_projection[i], float4(input.world_position, 1.0));
-        shadow_space.xyz /= shadow_space.w;
-        float2 shadow_uv = shadow_space.xy * 0.5 + 0.5;
-        if (all(saturate(shadow_uv) == shadow_uv))
-        {
-            cascade = i;
-            break;
-        }
-    }
-#endif
+
     { // Shadow map
         float4 shadow_space = mul(globals.shadow_view_projection[cascade], float4(input.world_position, 1.0));
         shadow_space.xyz /= shadow_space.w;

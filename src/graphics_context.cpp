@@ -17,14 +17,14 @@ void Context::init(int window_width, int window_height)
 {
     SDL_Init(SDL_INIT_VIDEO);
 
-    window = SDL_CreateWindow("Gigasticle", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_VULKAN);
+    window = SDL_CreateWindow("GigaVFX", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_VULKAN);
     SDL_GetWindowSize(window, &this->window_width, &this->window_height);
 
     VK_CHECK(volkInitialize());
 
     vkb::InstanceBuilder instance_builder;
     instance_builder.require_api_version(1, 3, 0);
-    instance_builder.set_app_name("Gigasticle");
+    instance_builder.set_app_name("GigaVFX");
     instance_builder.request_validation_layers();
     instance_builder.enable_validation_layers();
     instance_builder.add_validation_feature_enable(VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT);

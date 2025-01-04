@@ -391,8 +391,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	}
 
 	particle_sort_axis = -half_vector;
-	//particle_sort_axis = -view_dir;
-	//draw_order_flipped = true;
 
 	{ // Update per frame globals
 		// TODO: Use staging buffer for this
@@ -400,9 +398,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		globals.particle_capacity = particle_capacity;
 		globals.transform = glm::mat4(1.0f);
 
-		//glm::mat4 shadow_proj = glm::ortho(-3.0f, 3.0f, -3.0f, 3.0f, 0.1f, 100.0f);
-		glm::vec3 center = glm::vec3(0.0f);
-		//glm::mat4 shadow_view = glm::lookAt(center + light_dir * 50.0f, center, glm::vec3(0.0f, 1.0f, 0.0));
 		globals.light_view = shadow_view;
 		globals.light_proj = shadow_projection;
 		globals.light_resolution = glm::uvec2(light_buffer_size, light_buffer_size);
@@ -706,8 +701,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	}
 #endif
 
-
-
 	particles_to_spawn -= std::floor(particles_to_spawn);
 
 	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool, 1);
@@ -907,10 +900,6 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 		clear.float32[1] = 1.0f - light_color.g;
 		clear.float32[2] = 1.0f - light_color.b;
 		clear.float32[3] = 0.0f;
-		//clear.float32[0] = light_color.r;
-		//clear.float32[1] = light_color.g;
-		//clear.float32[2] = light_color.b;
-		//clear.float32[3] = 0.0f;
 
 		VkImageSubresourceRange range{};
 		range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -924,9 +913,9 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 	for (uint32_t i = 0; i < slices_to_display; ++i)
 	{
 		render_slice_light(i);
-		VkHelpers::full_barrier(cmd);
+		VkHelpers::fragment_barrier_simple(cmd);
 		render_slice_view(i, draw_order_flipped);
-		VkHelpers::full_barrier(cmd);
+		VkHelpers::fragment_barrier_simple(cmd);
 	}
 
 	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool, 3);

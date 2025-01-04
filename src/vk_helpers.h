@@ -80,4 +80,26 @@ namespace VkHelpers
 		info.accelerationStructure = as;
 		return vkGetAccelerationStructureDeviceAddressKHR(device, &info);
 	}
+
+	// From NVIDIA sample framework:
+	// Adds a simple command that ensures that all fragment shader reads writes have finished before all
+	// subsequent fragment shader reads and writes (in the current scope).
+	// Note that on NV hardware, unless you need a layout transition, there's little benefit to using
+	// memory barriers for each of the individual objects (and in fact may run into issues with the
+	// Vulkan specification).
+	// The dependency flags are BY_REGION_BIT by default, since most calls to cmdBarrier come from
+	// dependencies inside render passes, which require this (according to section 6.6.1).
+	inline void fragment_barrier_simple(VkCommandBuffer cmd)
+	{
+		const VkPipelineStageFlags stage_flags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+		VkMemoryBarrier barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		barrier.dstAccessMask = barrier.srcAccessMask;
+
+		vkCmdPipelineBarrier(cmd, stage_flags, stage_flags, VK_DEPENDENCY_BY_REGION_BIT,
+			1, &barrier,
+			0, VK_NULL_HANDLE,
+			0, VK_NULL_HANDLE);
+	}
 }

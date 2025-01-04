@@ -55,10 +55,7 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p;
     p.velocity = 0;
     p.lifetime = push_constants.lifetime;
-    //p.velocity = point_on_sphere;
-    //p.velocity = float3(0, 1, 0);
     p.position = float3(0, 1, 0) + point_on_sphere * push_constants.emitter_radius * sqrt(float(seed.z) / float(0xFFFFFFFFu));
-    //p.velocity = curl_noise(p.position);
     particles[global_particle_index + local_index] = p;
 }
 
@@ -102,17 +99,6 @@ void cs_write_draw( uint3 thread_id : SV_DispatchThreadID )
     uint draw_count = push_constants.num_slices == 0 
         ? active_particles
         : (active_particles + push_constants.num_slices - 1) / push_constants.num_slices;
-
-#if 0 
-    if (thread_id.x == 0)
-    {
-        printf("particle count: %d, draw count: %d, slices: %d", 
-            active_particles,
-            draw_count,
-            push_constants.num_slices
-        );
-    }
-#endif
 
     DrawIndirectCommand draw_cmd;
     draw_cmd.vertexCount = 1;
