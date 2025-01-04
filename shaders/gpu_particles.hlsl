@@ -294,7 +294,12 @@ VSOutput vs_light(VSInput input)
     const float particle_size = push_constants.particle_size;
     float4 corner = float4(particle_size * 0.5, particle_size * 0.5, view_pos.z, 1.0);
     float4 proj_corner = mul(system_globals.light_proj, corner);
-    float point_size = system_globals.light_resolution.x * proj_corner.x / proj_corner.w;
+    // Normally the center in view space would be expected to map to 0, 0 in clip space, 
+    // but the shadow map projection has an additional translation that is used to snap 
+    // the offset to pixel centers to avoid shimmering under motion.
+    float4 center = float4(0, 0, view_pos.z, 1.0);
+    float4 proj_center = mul(system_globals.light_proj, center);
+    float point_size = system_globals.light_resolution.x * (proj_corner.x - proj_center.x) / proj_corner.w;
 
     output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
 

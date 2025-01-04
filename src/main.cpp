@@ -549,11 +549,15 @@ int main(int argc, char** argv)
                 float zfar_minus_znear = -1.0f / shadow_proj[2][2];
                 globals.shadow_projection_info[i] = glm::vec4(zfar_minus_znear, znear, 0.0f, 0.0f);
 
+                // Snap to pixel center to avoid shimmering
                 glm::vec4 shadow_origin = shadow_view_projs[i] * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
                 shadow_origin /= shadow_origin.w;
-                float step = 1.0f / 1024.0f;
+                float step = 1.0f / ((float)DEPTH_TEXTURE_SIZE * 0.5f);
                 glm::vec2 rounded = glm::round(glm::vec2(shadow_origin) / step) * step;
-                //globals.shadow_view_projection[i] = glm::translate(glm::mat4(1.0f), glm::vec3(rounded.x - shadow_origin.x, rounded.y - shadow_origin.y, 0.0f)) * globals.shadow_view_projection[i];
+
+                glm::mat4 translate = glm::translate(glm::mat4(1.0f), glm::vec3(rounded.x - shadow_origin.x, rounded.y - shadow_origin.y, 0.0f));
+                shadow_projs[i] = globals.shadow_projection[i] = translate * shadow_proj;
+                globals.shadow_view_projection[i] = translate * globals.shadow_view_projection[i];
             }
 
             void* mapped;
