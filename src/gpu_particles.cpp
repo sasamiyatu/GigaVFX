@@ -6,12 +6,15 @@
 #include "imgui/imgui.h"
 #include "camera.h"
 #include "vk_helpers.h"
+#include "sdf.h"
 
 constexpr VkFormat PARTICLE_RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr VkFormat LIGHT_RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr uint32_t MIN_SLICES = 1;
 constexpr uint32_t MAX_SLICES = 128;
 constexpr float MAX_DELTA_TIME = 0.1f;
+
+static_assert(sizeof(GPUParticlePushConstants) <= 128);
 
 static uint32_t get_dispatch_size(uint32_t particle_capacity)
 {
@@ -20,7 +23,7 @@ static uint32_t get_dispatch_size(uint32_t particle_capacity)
 
 void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, 
 	const Texture& shadowmap_texture, uint32_t cascade_index, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, 
-	const Texture* sdf_texture,
+	const SDF* sdf,
 	bool emit_once)
 {
 	assert(shadowmap_texture.width != 0);
@@ -374,7 +377,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 	// SDF stuff used for mesh based simulation
 	{
-		this->sdf_texture = sdf_texture;
+		this->sdf = sdf;
 
 		VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
 		info.magFilter = VK_FILTER_LINEAR;
@@ -482,12 +485,12 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		DescriptorInfo(light_sampler),
 		DescriptorInfo(light_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
 		DescriptorInfo(sdf_sampler),
-		DescriptorInfo(sdf_texture->view, sdf_texture->layout),
+		DescriptorInfo(sdf->texture.view, sdf->texture.layout),
 	};
 
 	// Likewise for push constants
 	GPUParticlePushConstants push_constants{};
-	push_constants.delta_time = dt;
+	push_constants.delta_time = time > 5.0f ? dt : 0.0f;
 	push_constants.particles_to_spawn = one_time_emit ? particle_capacity :  (uint32_t)particles_to_spawn;
 	push_constants.particle_size = particle_size;
 	push_constants.particle_color = particle_color;
@@ -499,6 +502,9 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.lifetime = particle_lifetime;
 	push_constants.noise_scale = noise_scale;
 	push_constants.noise_time_scale = noise_time_scale;
+	push_constants.sdf_grid_dims = sdf->dims;
+	push_constants.sdf_grid_spacing = sdf->grid_spacing;
+	push_constants.sdf_origin = sdf->grid_origin + glm::vec3(0.0f, 5.0f, 0.0f);
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);

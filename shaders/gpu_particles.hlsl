@@ -107,33 +107,28 @@ float4 get_texel( float3 p, float3 dims )
     return sdf_texture.SampleLevel(sdf_sampler, p, 0);
 }
 
-float sdf_func(float3 p)
+float sdf(float3 p)
 {
     //return abs(sdf_sphere(p, float3(0, 2, 0), 0.5));
     //return abs(sdTorus(float3(p.x, p.y - 1.0, p.z), float2(0.5, 0.15)));
     //return abs(sdBoxFrame(float3(p.x, p.y - 2.0, p.z), float3(0.5,0.3,0.5), 0.025));
 
-    uint3 dims;
-    sdf_texture.GetDimensions(dims.x, dims.y, dims.z);
-    float3 rad = float3(dims) / 255.0;
-    float3 origin = float3(0, 2, 0) - rad;
-    float3 local_pos = p - origin;
-    float3 grid_uv = local_pos / (rad * 2.0);
-    float3 box_center = origin + rad;
+    const float sdf_scale = 0.1;
+    float3 bb_min = push_constants.sdf_origin * sdf_scale;
+    float3 bb_max = (push_constants.sdf_origin + push_constants.sdf_grid_spacing * float3(push_constants.sdf_grid_dims)) * sdf_scale;
+    float3 extent = bb_max - bb_min;
+    float3 local_pos = p - bb_min;
+    float3 grid_uv = local_pos / extent;
 
-    float box_dist = sdBox( p - box_center, rad );
-    float lerp_t = smoothstep(0, 0.5, box_dist);
-
-    float d = (sdf_texture.SampleLevel(sdf_sampler, grid_uv, 0));
-    //float d = get_texel(grid_uv, float3(dims)).r;
-
-    d = abs(d);
-    //d = abs(max(box_dist, d));
-
-    //d = lerp(abs(d), abs(box_dist), lerp_t);
-
+    float d = (sdf_texture.SampleLevel(sdf_sampler, grid_uv, 0)).x;
     return d;
-}   
+}
+
+float sdf_func(float3 p)
+{
+    return abs(sdf(p));
+}
+
 
 float3 sdf_normal( in float3 p ) // for function f(p)
 {
@@ -146,7 +141,7 @@ float3 sdf_normal( in float3 p ) // for function f(p)
 
 float3 sdf_gradient(in float3 p)
 {
-    const float eps = 0.0001; // or some other value
+    const float eps = 0.001; // or some other value
     const float2 h = float2(eps,0);
     return float3(sdf_func(p+h.xyy) - sdf_func(p-h.xyy),
                            sdf_func(p+h.yxy) - sdf_func(p-h.yxy),
@@ -185,21 +180,18 @@ void emit_sphere( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p;
     p.velocity = 0;
     p.lifetime = 100.0;
-    //p.position = float3(0, 1, 0) + point_on_sphere * 2.0;
     
-    uint3 dims;
-    sdf_texture.GetDimensions(dims.x, dims.y, dims.z);
-    float3 rad = float3(dims) / 255.0;
+    const float sdf_scale = 0.1;
+    float3 bb_min = push_constants.sdf_origin * sdf_scale;
+    float3 bb_max = (push_constants.sdf_origin + push_constants.sdf_grid_spacing * float3(push_constants.sdf_grid_dims)) * sdf_scale;
+    float3 extent = bb_max - bb_min;
 
-    float3 center = float3(0, 2, 0);
-    float3 floor_center = center - float3(0, rad.y, 0);
-    p.position = floor_center + (uniform_random(seed).xyz * 1.8 - 0.9) * (float3(rad.x, 0, rad.z));
-
+    p.position = float3(bb_min.x + 0.1, bb_min.y + 0.1, bb_min.z + 0.1) + uniform_random(seed).xyz * float3(extent.x - 0.2, 0, extent.z - 0.2);
     // float3 pos;
     // do {
-    //     pos = float3(0, 2, 0) + (uniform_random(seed).xyz * 2.0 - 1.0) * rad;
-    // } while (sdf_func(pos) > 0);
-    //p.position = pos;
+    //     pos = bb_min + extent * uniform_random(seed).xyz;
+    // } while (sdf(pos) > 0);
+    // p.position = pos;
     particles[global_particle_index + local_index] = p;
 }
 
@@ -223,16 +215,19 @@ void update_simple( uint3 thread_id : SV_DispatchThreadID )
         float3 to_surface = sdf_func(p.position) > 0.0 ? -n : n;
         float d = sdf_func(p.position);
 
-        float damping = pow(smoothstep(0, 1, d) * 0.9 + 0.1, push_constants.delta_time);
+
+        float damping = pow(smoothstep(0, 1, d) * 0.9 + 0.1, push_constants.delta_time * 0.2);
         //p.velocity = sdf_normal(p.position) * 0.1 + curl_noise(p.position, 0) * 0.1;
         float3 attraction = -sdf_gradient(p.position);
+
+        //if (thread_id.x == 0) printf("d: %f -grad: (%f  %f %f)", d, attraction.x, attraction.y, attraction.z);
         float3 c = curl_noise(p.position, 0);
-        p.velocity += attraction * push_constants.delta_time;
-        //p.velocity = (curl * 0.1);
+        p.velocity += (attraction + curl * 0.1)* push_constants.delta_time * 0.2;
+        //p.velocity += (curl * 0.1) * push_constants.delta_time;
         //p.velocity += (attraction) * push_constants.delta_time;
         //p.velocity += (curl * 0.1 + to_surface)  * push_constants.delta_time;
         p.velocity *= damping;
-        p.position += p.velocity * push_constants.delta_time;
+        p.position += p.velocity * push_constants.delta_time * 0.2;
         p.lifetime -= push_constants.delta_time;
         //if (sdf_func(p.position) > 0.01) p.lifetime = -1.0;
     }

@@ -354,12 +354,12 @@ int main(int argc, char** argv)
     constexpr uint32_t particle_capacity = 1048576;
     GPUParticleSystem smoke_system;
     smoke_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity, shadowmap_texture, 1,
-        {"gpu_particles.hlsl", "cs_emit_particles"}, {"gpu_particles.hlsl", "cs_simulate_particles"}, &sdf.texture);
+        {"gpu_particles.hlsl", "cs_emit_particles"}, {"gpu_particles.hlsl", "cs_simulate_particles"}, &sdf);
     smoke_system.set_position(glm::vec3(0.0f, 0.0f, 0.0f));
 
     GPUParticleSystem surface_flow_system;
-    surface_flow_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 300, shadowmap_texture, 1,
-        { "gpu_particles.hlsl", "emit_sphere" }, { "gpu_particles.hlsl", "update_simple" }, &sdf.texture, true);
+    surface_flow_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 3000, shadowmap_texture, 1,
+        { "gpu_particles.hlsl", "emit_sphere" }, { "gpu_particles.hlsl", "update_simple" }, &sdf, true);
     surface_flow_system.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
 
     std::vector<MeshInstance> mesh_draws;
