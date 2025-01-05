@@ -10,16 +10,26 @@ struct AccelerationStructure
     Buffer scratch_buffer;
 };
 
+struct ShaderInfo
+{
+    std::string shader_source_file;
+    std::string entry_point;
+};
+
 struct GPUParticleSystem
 {
-    void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, 
-        const Texture& shadowmap_texture, uint32_t cascade_index);
+    void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity,
+        const Texture& shadowmap_texture, uint32_t cascade_index, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, bool emit_once = false);
     void simulate(VkCommandBuffer cmd, float dt, struct CameraState& camera_state, glm::mat4 shadow_view, glm::mat4 shadow_projection);
     void render(VkCommandBuffer cmd, const Texture& depth_target);
     void composite(VkCommandBuffer cmd, const Texture& render_target);
     void destroy();
     void draw_stats_overlay();
     void draw_ui(); // Draws into the currently active imgui window
+    void set_position(glm::vec3 pos) { position = pos; }
+
+    bool first_frame = true;
+    bool one_time_emit = false;
 
     struct Context* ctx = nullptr;
     VkBuffer shader_globals = VK_NULL_HANDLE;
@@ -48,6 +58,8 @@ struct GPUParticleSystem
     struct ComputePipelineAsset* particle_compact_pipeline = nullptr;
     struct ComputePipelineAsset* particle_debug_sort_pipeline = nullptr;
     struct ComputePipelineAsset* particle_composite_pipeline = nullptr;
+
+    glm::vec3 position = glm::vec3(0.0f);
     uint32_t particle_capacity = 0;
     float particle_spawn_rate = 10000.0f;
     float particles_to_spawn = 0.0f;

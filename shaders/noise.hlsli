@@ -9,10 +9,21 @@
 #include "simplex_noise.hlsli"
 #include "random.hlsli"
 
+#if 1
+float3 hash( float3 p ) // replace this by something better
+{
+	p = float3( dot(p,float3(127.1,311.7, 74.7)),
+			  dot(p,float3(269.5,183.3,246.1)),
+			  dot(p,float3(113.5,271.9,124.6)));
+
+	return -1.0 + 2.0*frac(sin(p)*43758.5453123);
+}
+#else
 float3 hash(uint3 x)
 {
      return -1.0 + 2.0 * (float3(pcg3d(x)) / float(0xffffffffu));
 }
+#endif
 
 // 0: cubic
 // 1: quintic
@@ -31,14 +42,14 @@ float gradient_noise3d( in float3 p )
     float3 u = f*f*(3.0-2.0*f);
 #endif    
 
-    return lerp( lerp( lerp( dot( hash( uint3(i) + uint3(0,0,0) ), f - float3(0.0,0.0,0.0) ), 
-                          dot( hash( uint3(i) + uint3(1,0,0) ), f - float3(1.0,0.0,0.0) ), u.x),
-                     lerp( dot( hash( uint3(i) + uint3(0,1,0) ), f - float3(0.0,1.0,0.0) ), 
-                          dot( hash( uint3(i) + uint3(1,1,0) ), f - float3(1.0,1.0,0.0) ), u.x), u.y),
-                lerp( lerp( dot( hash( uint3(i) + uint3(0,0,1) ), f - float3(0.0,0.0,1.0) ), 
-                          dot( hash( uint3(i) + uint3(1,0,1) ), f - float3(1.0,0.0,1.0) ), u.x),
-                     lerp( dot( hash( uint3(i) + uint3(0,1,1) ), f - float3(0.0,1.0,1.0) ), 
-                          dot( hash( uint3(i) + uint3(1,1,1) ), f - float3(1.0,1.0,1.0) ), u.x), u.y), u.z );
+    return lerp( lerp( lerp( dot( hash( i + float3(0,0,0) ), f - float3(0.0,0.0,0.0) ), 
+                          dot( hash( i + float3(1,0,0) ), f - float3(1.0,0.0,0.0) ), u.x),
+                     lerp( dot( hash( i + float3(0,1,0) ), f - float3(0.0,1.0,0.0) ), 
+                          dot( hash( i + float3(1,1,0) ), f - float3(1.0,1.0,0.0) ), u.x), u.y),
+                lerp( lerp( dot( hash( i + float3(0,0,1) ), f - float3(0.0,0.0,1.0) ), 
+                          dot( hash( i + float3(1,0,1) ), f - float3(1.0,0.0,1.0) ), u.x),
+                     lerp( dot( hash( i + float3(0,1,1) ), f - float3(0.0,1.0,1.0) ), 
+                          dot( hash( i + float3(1,1,1) ), f - float3(1.0,1.0,1.0) ), u.x), u.y), u.z );
 }
 
 

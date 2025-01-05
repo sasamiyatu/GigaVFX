@@ -326,8 +326,15 @@ int main(int argc, char** argv)
     particle_system_manager.init(&particle_renderer);
 
     constexpr uint32_t particle_capacity = 1048576;
-    GPUParticleSystem gpu_particle_system;
-    gpu_particle_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity, shadowmap_texture, 1);
+    GPUParticleSystem smoke_system;
+    smoke_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity, shadowmap_texture, 1,
+        {"gpu_particles.hlsl", "cs_emit_particles"}, {"gpu_particles.hlsl", "cs_simulate_particles"});
+    smoke_system.set_position(glm::vec3(0.0f, 0.0f, 0.0f));
+
+    GPUParticleSystem surface_flow_system;
+    surface_flow_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 3000, shadowmap_texture, 1,
+        { "gpu_particles.hlsl", "emit_sphere" }, { "gpu_particles.hlsl", "update_simple" }, true);
+    surface_flow_system.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
 
     std::vector<MeshInstance> mesh_draws;
 
@@ -354,9 +361,9 @@ int main(int argc, char** argv)
         { // Frame stats
             ImGui::Begin("GPU Particle System");
             ImGui::Text("Frame time: %f ms", ctx.smoothed_frame_time_ns * 1e-6f);
-            ImGui::Text("Particle simulate: %f us", gpu_particle_system.performance_timings.simulate_total * 1e-3f);
-            ImGui::Text("Particle render: %f us", gpu_particle_system.performance_timings.render_total * 1e-3f);
-            gpu_particle_system.draw_ui();
+            ImGui::Text("Particle simulate: %f us", smoke_system.performance_timings.simulate_total * 1e-3f);
+            ImGui::Text("Particle render: %f us", smoke_system.performance_timings.render_total * 1e-3f);
+            smoke_system.draw_ui();
             ImGui::End();
         }
 
@@ -562,6 +569,9 @@ int main(int argc, char** argv)
             vmaUnmapMemory(ctx.allocator, globals_buffer.allocation);
         }
 
+        smoke_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
+        surface_flow_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
+
         { // Transition depth buffer layout
             VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -694,9 +704,6 @@ int main(int argc, char** argv)
             vkCmdEndRendering(command_buffer);
         }
 
-        // Where is the correct spot for this?
-        gpu_particle_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
-
         { // Depth prepass
             VkRenderingAttachmentInfo depth_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             depth_info.imageView = depth_texture.view;
@@ -772,7 +779,8 @@ int main(int argc, char** argv)
             vkCmdPipelineBarrier2(command_buffer, &dependency_info);
         }
 
-        gpu_particle_system.render(command_buffer, depth_texture);
+        smoke_system.render(command_buffer, depth_texture);
+        surface_flow_system.render(command_buffer, depth_texture);
 
         { // Forward pass
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -814,7 +822,7 @@ int main(int argc, char** argv)
                 DescriptorInfo(shadowmap_texture.view, VK_IMAGE_LAYOUT_GENERAL),
                 DescriptorInfo(shadow_sampler),
                 DescriptorInfo(point_sampler),
-                DescriptorInfo(gpu_particle_system.light_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
+                DescriptorInfo(smoke_system.light_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
             };
 
             vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, pipeline->pipeline.descriptor_update_template, pipeline->pipeline.layout, 0, descriptor_info);
@@ -846,7 +854,8 @@ int main(int argc, char** argv)
 
         vkCmdEndRendering(command_buffer);
 
-        gpu_particle_system.composite(command_buffer, hdr_render_target);
+        smoke_system.composite(command_buffer, hdr_render_target);
+        surface_flow_system.composite(command_buffer, hdr_render_target);
 
 #if 0
         DescriptorInfo desc_info[] = {
@@ -943,7 +952,8 @@ int main(int argc, char** argv)
         vkDestroyImageView(ctx.device, t.view, nullptr);
         vmaDestroyImage(ctx.allocator, t.image, t.allocation);
     }
-    gpu_particle_system.destroy();
+    smoke_system.destroy();
+    surface_flow_system.destroy();
     depth_prepass->builder.destroy_resources(depth_prepass->pipeline);
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);

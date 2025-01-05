@@ -18,7 +18,8 @@ static uint32_t get_dispatch_size(uint32_t particle_capacity)
 	return (particle_capacity + 63) / 64;
 }
 
-void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, const Texture& shadowmap_texture, uint32_t cascade_index)
+void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, 
+	const Texture& shadowmap_texture, uint32_t cascade_index, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, bool emit_once)
 {
 	assert(shadowmap_texture.width != 0);
 
@@ -26,6 +27,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 	shader_globals = globals_buffer;
 	this->particle_capacity = particle_capacity;
 	this->light_buffer_size = shadowmap_texture.width;
+	one_time_emit = emit_once;
 
 	{ // Create image view for shadow map
 		VkImageViewCreateInfo cinfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
@@ -123,7 +125,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 	{ // Emit pipeline
 		ComputePipelineBuilder builder(ctx->device, true);
-		builder.set_shader_filepath("gpu_particles.hlsl", "cs_emit_particles");
+		builder.set_shader_filepath(emit_shader.shader_source_file.c_str(), emit_shader.entry_point.c_str());
 		particle_emit_pipeline = new ComputePipelineAsset(builder);
 		AssetCatalog::register_asset(particle_emit_pipeline);
 	}
@@ -144,7 +146,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 	{ // Simulate pipeline
 		ComputePipelineBuilder builder(ctx->device, true);
-		builder.set_shader_filepath("gpu_particles.hlsl", "cs_simulate_particles");
+		builder.set_shader_filepath(update_shader.shader_source_file.c_str(), update_shader.entry_point.c_str());
 		particle_simulate_pipeline = new ComputePipelineAsset(builder);
 		AssetCatalog::register_asset(particle_simulate_pipeline);
 	}
@@ -396,7 +398,8 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		// TODO: Use staging buffer for this
 		GPUParticleSystemGlobals globals{};
 		globals.particle_capacity = particle_capacity;
-		globals.transform = glm::mat4(1.0f);
+		//globals.transform = glm::mat4(1.0f);
+		globals.transform = glm::translate(position);
 
 		globals.light_view = shadow_view;
 		globals.light_proj = shadow_projection;
@@ -408,8 +411,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		vmaUnmapMemory(ctx->allocator, system_globals.allocation);
 	}
 
-	static bool first = true;
-	if (!first)
+	if (!first_frame)
 	{ // TODO: This performance timing stuff is probably incorrect when multiple frames are in flight
 		uint64_t query_results[4];
 		vkGetQueryPoolResults(ctx->device, query_pool, 0, 4, sizeof(query_results), query_results, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
@@ -421,7 +423,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		double ns_render = ctx->physical_device.properties.limits.timestampPeriod * delta_render;
 		performance_timings.render_total = glm::mix(ns_render, performance_timings.render_total, 0.95);
 	}
-	first = false;
 
 	vkCmdResetQueryPool(cmd, query_pool, 0, 256);
 
@@ -468,7 +469,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	// Likewise for push constants
 	GPUParticlePushConstants push_constants{};
 	push_constants.delta_time = dt;
-	push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
+	push_constants.particles_to_spawn = one_time_emit ? particle_capacity :  (uint32_t)particles_to_spawn;
 	push_constants.particle_size = particle_size;
 	push_constants.particle_color = particle_color;
 	push_constants.sort_axis = particle_sort_axis;
@@ -497,6 +498,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 			0, nullptr);
 	}
 
+	if (!one_time_emit || first_frame)
 	{ // Emit particles
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_emit_pipeline->pipeline.pipeline);
 		vkCmdPushDescriptorSetWithTemplateKHR(cmd, particle_emit_pipeline->pipeline.descriptor_update_template,
@@ -708,6 +710,8 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	// Swap buffers
 	std::swap(particle_system_state[0], particle_system_state[1]);
 	std::swap(particle_buffer[0], particle_buffer[1]);
+
+	first_frame = false;
 }
 
 void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
