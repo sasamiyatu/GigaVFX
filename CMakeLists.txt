@@ -39,6 +39,8 @@ add_executable(gigavfx
     src/radix_sort.h
     src/radix_sort.cpp
     src/random.h
+    src/sdf.h
+    src/sdf.cpp
     src/shaders.h
     src/shaders.cpp
     src/spirv_reflect.c

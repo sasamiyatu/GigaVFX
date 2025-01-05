@@ -563,9 +563,20 @@ bool Context::create_texture(Texture& texture, uint32_t width, uint32_t height, 
     VkImageView view = VK_NULL_HANDLE;
     VK_CHECK(vmaCreateImage(allocator, &image_create_info, &allocation_create_info, &image, &allocation, nullptr));
 
+    auto guess_view_type = [](uint32_t w, uint32_t h, uint32_t d, uint32_t layers) -> VkImageViewType {
+        if (d == 1)
+        {
+            return layers == 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        }
+        else
+        {
+            return VK_IMAGE_VIEW_TYPE_3D; // 3D array doesn't exist?
+        }
+    };
+
     VkImageViewCreateInfo image_view_info{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     image_view_info.image = image;
-    image_view_info.viewType = array_layers == 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    image_view_info.viewType = guess_view_type(width, height, depth, array_layers);
     image_view_info.format = format;
     image_view_info.subresourceRange.aspectMask = determine_image_aspect(format);
     image_view_info.subresourceRange.baseArrayLayer = 0;
@@ -728,7 +739,7 @@ bool Context::create_textures(Texture* textures, uint32_t count)
             height = next_height;
         }
 
-        { // Transition to transfer src optimal
+        { // Transition to read only optimal
             VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 0,

@@ -18,6 +18,7 @@
 #include "misc.h"
 #include "pipeline.h"
 #include "shaders.h"
+#include "sdf.h"
 #include "gmath.h"
 #include "hot_reload.h"
 #include "mesh.h"
@@ -160,14 +161,27 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
+    SDF sdf{};
+    if (!sdf_load_from_file(sdf, "data/dragon.sdf"))
+    {
+        LOG_ERROR("Failed to load SDF!");
+        exit(EXIT_FAILURE);
+    }
+
     ctx.init(WINDOW_WIDTH, WINDOW_HEIGHT);
+
+    if (!sdf.init_texture(ctx))
+    {
+        LOG_ERROR("Failed to initialize SDF texture!");
+        return(EXIT_FAILURE);
+    }
 
     init_imgui();
 
     // Init shader compiler
     Shaders::init();
 
-    VkSampler sampler = VK_NULL_HANDLE;
+    VkSampler anisotropic_sampler = VK_NULL_HANDLE;
     {
         VkSamplerCreateInfo info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
         info.magFilter = VK_FILTER_LINEAR;
@@ -177,8 +191,20 @@ int main(int argc, char** argv)
         info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         info.maxLod = VK_LOD_CLAMP_NONE;
         info.anisotropyEnable = VK_TRUE;
+        info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
         info.maxAnisotropy = ctx.physical_device.properties.limits.maxSamplerAnisotropy;
-        VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &sampler));
+        VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &anisotropic_sampler));
+    }
+    VkSampler bilinear_sampler = VK_NULL_HANDLE;
+    {
+        VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        info.magFilter = VK_FILTER_LINEAR;
+        info.minFilter = VK_FILTER_LINEAR;
+        info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &bilinear_sampler));
     }
     VkSampler shadow_sampler = VK_NULL_HANDLE;
     {
@@ -328,12 +354,12 @@ int main(int argc, char** argv)
     constexpr uint32_t particle_capacity = 1048576;
     GPUParticleSystem smoke_system;
     smoke_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity, shadowmap_texture, 1,
-        {"gpu_particles.hlsl", "cs_emit_particles"}, {"gpu_particles.hlsl", "cs_simulate_particles"});
+        {"gpu_particles.hlsl", "cs_emit_particles"}, {"gpu_particles.hlsl", "cs_simulate_particles"}, &sdf.texture);
     smoke_system.set_position(glm::vec3(0.0f, 0.0f, 0.0f));
 
     GPUParticleSystem surface_flow_system;
-    surface_flow_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 3000, shadowmap_texture, 1,
-        { "gpu_particles.hlsl", "emit_sphere" }, { "gpu_particles.hlsl", "update_simple" }, true);
+    surface_flow_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 300, shadowmap_texture, 1,
+        { "gpu_particles.hlsl", "emit_sphere" }, { "gpu_particles.hlsl", "update_simple" }, &sdf.texture, true);
     surface_flow_system.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
 
     std::vector<MeshInstance> mesh_draws;
@@ -343,6 +369,15 @@ int main(int argc, char** argv)
     builder.set_shader_filepath("test_acceleration_structure.hlsl", "test_acceleration_structure");
     ComputePipelineAsset* test_pipeline = new ComputePipelineAsset(builder);
     AssetCatalog::register_asset(test_pipeline);
+
+    // Test sdf
+    ComputePipelineAsset* sdf_test = nullptr;
+    {
+        ComputePipelineBuilder builder(ctx.device, true);
+        builder.set_shader_filepath("sdf_test.hlsl", "test_sdf");
+        sdf_test = new ComputePipelineAsset(builder);
+        AssetCatalog::register_asset(sdf_test);
+    }
 
     glm::vec3 sundir = glm::normalize(glm::vec3(1.0f));
     bool running = true;
@@ -669,7 +704,7 @@ int main(int argc, char** argv)
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowmap_pipeline->pipeline.layout, 1, 1, &ctx.bindless_descriptor_set, 0, nullptr);
 
             DescriptorInfo descriptor_info[] = {
-                DescriptorInfo(sampler),
+                DescriptorInfo(anisotropic_sampler),
                 DescriptorInfo(globals_buffer.buffer),
                 DescriptorInfo(materials_buffer.buffer)
             };
@@ -816,7 +851,7 @@ int main(int argc, char** argv)
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline.layout, 1, 1, &ctx.bindless_descriptor_set, 0, nullptr);
 
             DescriptorInfo descriptor_info[] = {
-                DescriptorInfo(sampler),
+                DescriptorInfo(anisotropic_sampler),
                 DescriptorInfo(globals_buffer.buffer),
                 DescriptorInfo(materials_buffer.buffer),
                 DescriptorInfo(shadowmap_texture.view, VK_IMAGE_LAYOUT_GENERAL),
@@ -853,6 +888,29 @@ int main(int argc, char** argv)
         }
 
         vkCmdEndRendering(command_buffer);
+
+#if 1
+        { // SDF test
+            DescriptorInfo desc_info[] = {
+                DescriptorInfo(globals_buffer.buffer),
+                DescriptorInfo(bilinear_sampler),
+                DescriptorInfo(sdf.texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+                DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
+            };
+
+            SDFPushConstants pc{};
+            pc.grid_dims = sdf.dims;
+            pc.grid_spacing = sdf.grid_spacing;
+            pc.grid_origin = sdf.grid_origin;
+
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, sdf_test->pipeline.pipeline);
+            vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, sdf_test->pipeline.descriptor_update_template, sdf_test->pipeline.layout, 0, desc_info);
+            vkCmdPushConstants(command_buffer, sdf_test->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+            vkCmdDispatch(command_buffer, (WINDOW_WIDTH + 7) / 8, (WINDOW_HEIGHT + 7) / 8, 1);
+
+            VkHelpers::full_barrier(command_buffer);
+        }
+#endif
 
         smoke_system.composite(command_buffer, hdr_render_target);
         surface_flow_system.composite(command_buffer, hdr_render_target);
@@ -944,7 +1002,8 @@ int main(int argc, char** argv)
     }
     vmaDestroyBuffer(ctx.allocator, materials_buffer.buffer, materials_buffer.allocation);
     vmaDestroyBuffer(ctx.allocator, globals_buffer.buffer, globals_buffer.allocation);
-    vkDestroySampler(ctx.device, sampler, nullptr);
+    vkDestroySampler(ctx.device, anisotropic_sampler, nullptr);
+    vkDestroySampler(ctx.device, bilinear_sampler, nullptr);
     vkDestroySampler(ctx.device, shadow_sampler, nullptr);
     vkDestroySampler(ctx.device, point_sampler, nullptr);
     for (auto& t : textures)
@@ -952,6 +1011,7 @@ int main(int argc, char** argv)
         vkDestroyImageView(ctx.device, t.view, nullptr);
         vmaDestroyImage(ctx.allocator, t.image, t.allocation);
     }
+    sdf.texture.destroy(ctx.device, ctx.allocator);
     smoke_system.destroy();
     surface_flow_system.destroy();
     depth_prepass->builder.destroy_resources(depth_prepass->pipeline);
@@ -960,6 +1020,7 @@ int main(int argc, char** argv)
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
     tonemap_pipeline->builder.destroy_resources(tonemap_pipeline->pipeline);
     test_pipeline->builder.destroy_resources(test_pipeline->pipeline);
+    sdf_test->builder.destroy_resources(sdf_test->pipeline);
     particle_renderer.shutdown();
 
     ctx.shutdown();

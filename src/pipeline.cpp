@@ -1,38 +1,12 @@
 #include "pipeline.h"
-#include "cmrc/cmrc.hpp"
 #include "shaders.h"
 #include <filesystem>
-CMRC_DECLARE(embedded_shaders);
 #include <optional>
 
-    static uint64_t get_file_timestamp(const std::string& path)
-    {
-        std::filesystem::file_time_type ftime = std::filesystem::last_write_time(std::filesystem::path(path));
-        return ftime.time_since_epoch().count();
-    }
-
-static std::string get_embedded_path(const char* src_path, VkShaderStageFlagBits shader_stage)
+static uint64_t get_file_timestamp(const std::string& path)
 {
-    std::string path = "shaders/" + std::string(src_path);
-    size_t dot = path.find_last_of('.');
-    path = path.substr(0, dot);
-    switch (shader_stage)
-    {
-    case VK_SHADER_STAGE_VERTEX_BIT:
-        path.append("_vs_6_6.spv");
-        break;
-    case VK_SHADER_STAGE_FRAGMENT_BIT:
-        path.append("_ps_6_6.spv");
-        break;
-    case VK_SHADER_STAGE_COMPUTE_BIT:
-        path.append("_cs_6_6.spv");
-        break;
-    default:
-        assert(false);
-        break;
-    }
-
-    return path;
+    std::filesystem::file_time_type ftime = std::filesystem::last_write_time(std::filesystem::path(path));
+    return ftime.time_since_epoch().count();
 }
 
 GraphicsPipelineBuilder::GraphicsPipelineBuilder(VkDevice dev, bool enable_shader_hot_reload)

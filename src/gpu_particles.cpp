@@ -19,7 +19,9 @@ static uint32_t get_dispatch_size(uint32_t particle_capacity)
 }
 
 void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, 
-	const Texture& shadowmap_texture, uint32_t cascade_index, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, bool emit_once)
+	const Texture& shadowmap_texture, uint32_t cascade_index, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, 
+	const Texture* sdf_texture,
+	bool emit_once)
 {
 	assert(shadowmap_texture.width != 0);
 
@@ -369,6 +371,21 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 			VK_CHECK(vkCreateSampler(ctx->device, &info, nullptr, &light_sampler));
 		}
 	}
+
+	// SDF stuff used for mesh based simulation
+	{
+		this->sdf_texture = sdf_texture;
+
+		VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+		info.magFilter = VK_FILTER_LINEAR;
+		info.minFilter = VK_FILTER_LINEAR;
+		info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		info.maxLod = VK_LOD_CLAMP_NONE;
+		info.maxAnisotropy = 1;
+		VK_CHECK(vkCreateSampler(ctx->device, &info, nullptr, &sdf_sampler));
+	}
 }
 
 void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& camera_state, glm::mat4 shadow_view, glm::mat4 shadow_projection)
@@ -464,6 +481,8 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		DescriptorInfo(indirect_draw_buffer.buffer),
 		DescriptorInfo(light_sampler),
 		DescriptorInfo(light_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
+		DescriptorInfo(sdf_sampler),
+		DescriptorInfo(sdf_texture->view, sdf_texture->layout),
 	};
 
 	// Likewise for push constants
@@ -958,6 +977,7 @@ void GPUParticleSystem::destroy()
 		radix_sort_context_destroy(sort_context); 
 		sort_context = nullptr;
 	}
+
 	vkDestroyImageView(ctx->device, light_depth_view, nullptr);
 	vkDestroyAccelerationStructureKHR(ctx->device, tlas.acceleration_structure, nullptr);
 	ctx->destroy_buffer(tlas.acceleration_structure_buffer);
@@ -966,6 +986,7 @@ void GPUParticleSystem::destroy()
 	particle_render_target.destroy(ctx->device, ctx->allocator);
 	light_render_target.destroy(ctx->device, ctx->allocator);
 	vkDestroySampler(ctx->device, light_sampler, nullptr);
+	vkDestroySampler(ctx->device, sdf_sampler, nullptr);
 	render_pipeline_back_to_front->builder.destroy_resources(render_pipeline_back_to_front->pipeline);
 	render_pipeline_front_to_back->builder.destroy_resources(render_pipeline_front_to_back->pipeline);
 	render_pipeline_light->builder.destroy_resources(render_pipeline_light->pipeline);

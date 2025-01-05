@@ -173,3 +173,10 @@ struct GPUParticleSort
     uint index;
     uint key;
 };
+
+struct SDFPushConstants
+{
+    uint3 grid_dims;
+    float grid_spacing;
+    float3 grid_origin;
+};

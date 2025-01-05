@@ -28,6 +28,8 @@
 [[vk::binding(11)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
 [[vk::binding(12)]] SamplerState light_sampler;
 [[vk::binding(13)]] Texture2D light_texture;
+[[vk::binding(14)]] SamplerState sdf_sampler;
+[[vk::binding(15)]] Texture3D sdf_texture;
 
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
@@ -59,37 +61,6 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     particles[global_particle_index + local_index] = p;
 }
 
-[numthreads(64, 1, 1)]
-void emit_sphere( uint3 thread_id : SV_DispatchThreadID )
-{
-    if (thread_id.x >= push_constants.particles_to_spawn)
-        return;
-
-    if (particle_system_state[0].active_particle_count >= system_globals.particle_capacity)
-        return;
-
-    uint lane_spawn_count = WaveActiveCountBits(true); // == Number of threads that passed the early return checks
-    uint local_index = WaveGetLaneIndex();
-    uint global_particle_index;
-
-    if (WaveIsFirstLane())
-        InterlockedAdd(particle_system_state[0].active_particle_count, lane_spawn_count, global_particle_index);
-
-    global_particle_index = WaveReadLaneFirst(global_particle_index);
-
-    uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
-    float3 grid_size = float3(2, 2, 2);
-    float3 point_on_grid = uniform_random(seed).xyz * grid_size;
-    //float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
-    GPUParticle p;
-    p.velocity = 0;
-    p.lifetime = 100.0;
-    //p.position = float3(0, 1, 0) + point_on_sphere;
-    p.position = float3(0, 0, 0) + float3(point_on_grid.x - 1, 0, point_on_grid.y - 1); 
-    particles[global_particle_index + local_index] = p;
-}
-
-
 float sdTorus( float3 p, float2 t )
 {
     float2 q = float2(length(p.xz)-t.x,p.y);
@@ -112,12 +83,57 @@ float sdBoxFrame( float3 p, float3 b, float e )
         length(max(float3(q.x,q.y,p.z),0.0))+min(max(q.x,max(q.y,p.z)),0.0));
 }
 
+float sdBox( float3 p, float3 b )
+{
+  float3 q = abs(p) - b;
+  return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+}
+
+float smax(float a, float b, float k)
+{
+    return log(exp(k*a)+exp(k*b))/k;
+}
+
+float4 get_texel( float3 p, float3 dims )
+{
+    p = p * dims + 0.5;
+
+    float3 i = floor(p);
+    float3 f = p - i;
+    f = f*f*f*(f*(f*6.0-15.0)+10.0);
+    p = i + f;
+
+    p = (p - 0.5)/ dims;
+    return sdf_texture.SampleLevel(sdf_sampler, p, 0);
+}
+
 float sdf_func(float3 p)
 {
-    //return abs(sdf_sphere(p, float3(0, 1, 0), 0.5));
+    //return abs(sdf_sphere(p, float3(0, 2, 0), 0.5));
     //return abs(sdTorus(float3(p.x, p.y - 1.0, p.z), float2(0.5, 0.15)));
-    return abs(sdBoxFrame(float3(p.x, p.y - 2.0, p.z), float3(0.5,0.3,0.5), 0.025));
-}
+    //return abs(sdBoxFrame(float3(p.x, p.y - 2.0, p.z), float3(0.5,0.3,0.5), 0.025));
+
+    uint3 dims;
+    sdf_texture.GetDimensions(dims.x, dims.y, dims.z);
+    float3 rad = float3(dims) / 255.0;
+    float3 origin = float3(0, 2, 0) - rad;
+    float3 local_pos = p - origin;
+    float3 grid_uv = local_pos / (rad * 2.0);
+    float3 box_center = origin + rad;
+
+    float box_dist = sdBox( p - box_center, rad );
+    float lerp_t = smoothstep(0, 0.5, box_dist);
+
+    float d = (sdf_texture.SampleLevel(sdf_sampler, grid_uv, 0));
+    //float d = get_texel(grid_uv, float3(dims)).r;
+
+    d = abs(d);
+    //d = abs(max(box_dist, d));
+
+    //d = lerp(abs(d), abs(box_dist), lerp_t);
+
+    return d;
+}   
 
 float3 sdf_normal( in float3 p ) // for function f(p)
 {
@@ -145,6 +161,49 @@ float3 scaled_normal(float3 p)
 }
 
 [numthreads(64, 1, 1)]
+void emit_sphere( uint3 thread_id : SV_DispatchThreadID )
+{
+    if (thread_id.x >= push_constants.particles_to_spawn)
+        return;
+
+    if (particle_system_state[0].active_particle_count >= system_globals.particle_capacity)
+        return;
+
+    uint lane_spawn_count = WaveActiveCountBits(true); // == Number of threads that passed the early return checks
+    uint local_index = WaveGetLaneIndex();
+    uint global_particle_index;
+
+    if (WaveIsFirstLane())
+        InterlockedAdd(particle_system_state[0].active_particle_count, lane_spawn_count, global_particle_index);
+
+    global_particle_index = WaveReadLaneFirst(global_particle_index);
+
+    uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
+    float3 grid_size = float3(1, 1, 1);
+    float3 point_on_grid = uniform_random(seed).xyz * grid_size;
+    float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
+    GPUParticle p;
+    p.velocity = 0;
+    p.lifetime = 100.0;
+    //p.position = float3(0, 1, 0) + point_on_sphere * 2.0;
+    
+    uint3 dims;
+    sdf_texture.GetDimensions(dims.x, dims.y, dims.z);
+    float3 rad = float3(dims) / 255.0;
+
+    float3 center = float3(0, 2, 0);
+    float3 floor_center = center - float3(0, rad.y, 0);
+    p.position = floor_center + (uniform_random(seed).xyz * 1.8 - 0.9) * (float3(rad.x, 0, rad.z));
+
+    // float3 pos;
+    // do {
+    //     pos = float3(0, 2, 0) + (uniform_random(seed).xyz * 2.0 - 1.0) * rad;
+    // } while (sdf_func(pos) > 0);
+    //p.position = pos;
+    particles[global_particle_index + local_index] = p;
+}
+
+[numthreads(64, 1, 1)]
 void update_simple( uint3 thread_id : SV_DispatchThreadID )
 {
     if (thread_id.x >= particle_system_state[0].active_particle_count)
@@ -165,14 +224,17 @@ void update_simple( uint3 thread_id : SV_DispatchThreadID )
         float d = sdf_func(p.position);
 
         float damping = pow(smoothstep(0, 1, d) * 0.9 + 0.1, push_constants.delta_time);
-        //p.velocity += curl_noise(p.position, 0) * push_constants.delta_time;
+        //p.velocity = sdf_normal(p.position) * 0.1 + curl_noise(p.position, 0) * 0.1;
         float3 attraction = -sdf_gradient(p.position);
         float3 c = curl_noise(p.position, 0);
-        p.velocity += (attraction + curl * 0.1) * push_constants.delta_time;
+        p.velocity += attraction * push_constants.delta_time;
+        //p.velocity = (curl * 0.1);
+        //p.velocity += (attraction) * push_constants.delta_time;
         //p.velocity += (curl * 0.1 + to_surface)  * push_constants.delta_time;
         p.velocity *= damping;
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
+        //if (sdf_func(p.position) > 0.01) p.lifetime = -1.0;
     }
 
     particles[thread_id.x] = p;
