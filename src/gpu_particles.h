@@ -16,11 +16,13 @@ struct ShaderInfo
     std::string entry_point;
 };
 
+struct SDF;
+
 struct GPUParticleSystem
 {
     void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity,
         const Texture& shadowmap_texture, uint32_t cascade_index, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, 
-        const Texture* sdf_texture,
+        const SDF* sdf,
         bool emit_once = false);
     void simulate(VkCommandBuffer cmd, float dt, struct CameraState& camera_state, glm::mat4 shadow_view, glm::mat4 shadow_projection);
     void render(VkCommandBuffer cmd, const Texture& depth_target);
@@ -88,7 +90,7 @@ struct GPUParticleSystem
     Texture light_render_target;
     VkSampler light_sampler;
 
-    const Texture* sdf_texture;
+    const SDF* sdf;
     VkSampler sdf_sampler;
 
     RadixSortContext* sort_context = nullptr;

@@ -65,12 +65,14 @@ float2 boxIntersection( in float3 ro, in float3 rd, in float3 rad, out float3 oN
 float sdf_func(in float3 p)
 {
     float scale = 0.1;
-    float3 bb_min = float3(-12.0467, -5, -8.1513) * scale;
-    float3 bb_max = float3(12.0467, 14.9399, 8.1513) * scale;
+    //float3 bb_min = float3(-12.0467, -5, -8.1513) * scale;
+    //float3 bb_max = float3(12.0467, 14.9399, 8.1513) * scale;
+    float3 bb_min = push_constants.grid_origin * scale;
+    float3 bb_max = (push_constants.grid_origin + push_constants.grid_spacing * float3(push_constants.grid_dims)) * scale;
     float3 extent = bb_max - bb_min;
     float3 local_pos = p - bb_min;
     float3 grid_uv = local_pos / extent;
-    return sdf_texture.SampleLevel(sdf_sampler, grid_uv, 0) * scale;
+    return sdf_texture.SampleLevel(sdf_sampler, grid_uv, 0).x * scale;
 }
 
 float3 sdf_normal( in float3 p ) // for function f(p)
@@ -94,8 +96,11 @@ void test_sdf( uint3 thread_id : SV_DispatchThreadID )
 
 
     float scale = 0.1;
-    float3 bb_min = float3(-12.0467, -5, -8.1513) * scale;
-    float3 bb_max = float3(12.0467, 14.9399, 8.1513) * scale;
+
+    //float3 bb_min = float3(-12.0467, -5, -8.1513) * scale;
+    //float3 bb_max = float3(12.0467, 14.9399, 8.1513) * scale;
+    float3 bb_min = push_constants.grid_origin * scale;
+    float3 bb_max = (push_constants.grid_origin + push_constants.grid_spacing * float3(push_constants.grid_dims)) * scale;
     float3 extent = bb_max - bb_min;
     float3 bb_center = (bb_min + bb_max) * 0.5;
 
