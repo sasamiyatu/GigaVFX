@@ -37,7 +37,7 @@ size_t load_meshes(Context& ctx, const cgltf_data* gltf_data, Mesh* out_meshes, 
             primitive.first_vertex = first_vertex;
             primitive.first_index = first_index;
             primitive.index_count = index_count;
-            primitive.material = cgltf_material_index(gltf_data, p.material);
+            primitive.material = p.material ? cgltf_material_index(gltf_data, p.material) : -1;
 
             indices.resize(first_index + index_count);
             cgltf_accessor_unpack_indices(p.indices, indices.data() + first_index, sizeof(uint32_t), index_count);
@@ -100,7 +100,7 @@ size_t load_meshes(Context& ctx, const cgltf_data* gltf_data, Mesh* out_meshes, 
                 }
             }
 
-            if (p.material->normal_texture.texture && !primitive_has_tangents)
+            if (p.material && p.material->normal_texture.texture && !primitive_has_tangents)
             {
                 LOG_WARNING("Primitive on mesh %s has a normal map but is missing tangents!", m.name ? m.name : "");
             }

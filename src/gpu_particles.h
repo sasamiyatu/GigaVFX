@@ -108,3 +108,51 @@ struct GPUParticleSystem
         double render_total = 0.0;
     } performance_timings;
 };
+
+struct GPUSurfaceFlowSystem
+{
+    void init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, const SDF* sdf, bool emit_once = false);
+    void simulate(VkCommandBuffer cmd, float dt);
+    void render(VkCommandBuffer cmd);
+    void destroy();
+    void set_position(glm::vec3 pos) { position = pos; }
+
+    struct Context* ctx = nullptr;
+    VkBuffer shader_globals = VK_NULL_HANDLE;
+    uint32_t particle_capacity = 0;
+    bool one_time_emit = false;
+    const struct SDF* sdf = nullptr;
+    float particles_to_spawn = 0.0f;
+    float time = 0.0f;
+    float particle_spawn_rate = 10.0f;
+    bool first_frame = true;
+    bool particles_initialized = false;
+    float particle_size = 0.1f;
+    glm::vec4 particle_color = glm::vec4(1.0f);
+    float particle_speed = 1.0f;
+
+    static constexpr uint32_t max_particles_in_cell = 6;
+
+    struct GraphicsPipelineAsset* render_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_emit_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_dispatch_size_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_draw_count_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_simulate_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_compact_pipeline = nullptr;
+    struct ComputePipelineAsset* update_grid_pipeline = nullptr;
+    struct ComputePipelineAsset* resolve_collisions_pipeline = nullptr;
+
+    // Double buffered
+    Buffer particle_buffer[2] = {};
+    Buffer particle_system_state[2] = {};
+
+    Buffer indirect_dispatch_buffer = {};
+    Buffer indirect_draw_buffer = {};
+
+    Buffer grid_counters = {};
+    Buffer grid_cells = {};
+
+    VkSampler sdf_sampler = VK_NULL_HANDLE;
+
+    glm::vec3 position = glm::vec3(0.0f);
+};

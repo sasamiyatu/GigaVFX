@@ -8,7 +8,7 @@ struct Mesh
 {
     struct Primitive
     {
-        uint32_t material;
+        int32_t material; // -1 if default material
         uint32_t first_vertex;
         uint32_t first_index;
         uint32_t index_count;

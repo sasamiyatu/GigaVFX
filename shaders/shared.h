@@ -109,6 +109,8 @@ struct GPUParticlePushConstants
     float3 sdf_origin;
     float sdf_grid_spacing;
     uint3 sdf_grid_dims;
+    uint particle_capacity;
+    uint max_particles_in_cell;
 };
 
 struct GPUParticleSystemGlobals

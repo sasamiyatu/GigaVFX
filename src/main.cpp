@@ -46,7 +46,6 @@ constexpr uint32_t DEPTH_TEXTURE_SIZE = 2048;
 
 Context ctx;
 
-std::vector<Mesh> meshes;
 
 template <typename F>
 void traverse_tree(const cgltf_node* node, F&& f)
@@ -300,6 +299,7 @@ int main(int argc, char** argv)
         AssetCatalog::register_asset(tonemap_pipeline);
     }
 
+    std::vector<Mesh> meshes;
     meshes.resize(gltf_data->meshes_count);
     load_meshes(ctx, gltf_data, meshes.data(), meshes.size());
 
@@ -361,6 +361,11 @@ int main(int argc, char** argv)
     surface_flow_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 3000, shadowmap_texture, 1,
         { "gpu_particles.hlsl", "emit_sphere" }, { "gpu_particles.hlsl", "update_simple" }, &sdf, true);
     surface_flow_system.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
+
+    GPUSurfaceFlowSystem flow2;
+    flow2.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 3000,
+        { "surface_flow.hlsl", "emit" }, { "surface_flow.hlsl", "simulate" }, &sdf, true);
+    flow2.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
 
     std::vector<MeshInstance> mesh_draws;
 
@@ -606,6 +611,7 @@ int main(int argc, char** argv)
 
         smoke_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
         surface_flow_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
+        flow2.simulate(command_buffer, (float)delta_time);
 
         { // Transition depth buffer layout
             VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
@@ -887,6 +893,8 @@ int main(int argc, char** argv)
             }
         }
 
+        flow2.render(command_buffer);
+
         vkCmdEndRendering(command_buffer);
 
 #if 1
@@ -1014,6 +1022,7 @@ int main(int argc, char** argv)
     sdf.texture.destroy(ctx.device, ctx.allocator);
     smoke_system.destroy();
     surface_flow_system.destroy();
+    flow2.destroy();
     depth_prepass->builder.destroy_resources(depth_prepass->pipeline);
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
