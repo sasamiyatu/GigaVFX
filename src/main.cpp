@@ -367,6 +367,9 @@ int main(int argc, char** argv)
         { "surface_flow.hlsl", "emit" }, { "surface_flow.hlsl", "simulate" }, &sdf, false);
     flow2.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
 
+    TrailBlazerSystem trail_blazer;
+    trail_blazer.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT);
+
     std::vector<MeshInstance> mesh_draws;
 
     // Test acceleration structure
@@ -612,6 +615,7 @@ int main(int argc, char** argv)
         smoke_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
         surface_flow_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
         flow2.simulate(command_buffer, (float)delta_time);
+        trail_blazer.simulate(command_buffer, (float)delta_time);
 
         { // Transition depth buffer layout
             VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
@@ -894,6 +898,7 @@ int main(int argc, char** argv)
         }
 
         flow2.render(command_buffer);
+        trail_blazer.render(command_buffer);
 
         vkCmdEndRendering(command_buffer);
 
@@ -1023,6 +1028,7 @@ int main(int argc, char** argv)
     smoke_system.destroy();
     surface_flow_system.destroy();
     flow2.destroy();
+    trail_blazer.destroy();
     depth_prepass->builder.destroy_resources(depth_prepass->pipeline);
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
