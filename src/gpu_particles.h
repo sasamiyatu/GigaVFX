@@ -124,7 +124,7 @@ struct GPUSurfaceFlowSystem
     const struct SDF* sdf = nullptr;
     float particles_to_spawn = 0.0f;
     float time = 0.0f;
-    float particle_spawn_rate = 10.0f;
+    float particle_spawn_rate = 1000.0f;
     bool first_frame = true;
     bool particles_initialized = false;
     float particle_size = 0.1f;

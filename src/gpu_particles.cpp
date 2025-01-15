@@ -1064,6 +1064,7 @@ void GPUSurfaceFlowSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat 
 	shader_globals = globals_buffer;
 	this->particle_capacity = particle_capacity;
 	one_time_emit = emit_once;
+	particle_size = sdf->grid_spacing;
 
 	{ // Render pipeline
 		GraphicsPipelineBuilder builder(ctx->device, true);
@@ -1231,24 +1232,29 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 		DescriptorInfo(indirect_draw_buffer.buffer),
 		DescriptorInfo(sdf_sampler),
 		DescriptorInfo(sdf->texture.view, sdf->texture.layout),
+		DescriptorInfo(grid_counters.buffer),
+		DescriptorInfo(grid_cells.buffer),
 	};
 
 	// Likewise for push constants
 	GPUParticlePushConstants push_constants{};
 	push_constants.delta_time = time > 5.0f ? dt : 0.0f;
 	push_constants.particles_to_spawn = one_time_emit ? particle_capacity : (uint32_t)particles_to_spawn;
-	push_constants.particle_size = particle_size;
+	push_constants.particle_size = particle_size * 0.1f;
 	push_constants.particle_color = particle_color;
 	push_constants.speed = particle_speed;
 	push_constants.time = time;
 	push_constants.sdf_grid_dims = sdf->dims;
 	push_constants.sdf_grid_spacing = sdf->grid_spacing;
-	push_constants.sdf_origin = sdf->grid_origin + glm::vec3(0.0f, 5.0f, 0.0f);
+	push_constants.sdf_origin = sdf->grid_origin + glm::vec3(0.0f, 25.0f, 0.0f);
 	push_constants.particle_capacity = particle_capacity;
+	push_constants.max_particles_in_cell = max_particles_in_cell;
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
 		vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, grid_counters.buffer, 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, grid_cells.buffer, 0, VK_WHOLE_SIZE, 0);
 
 		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1316,6 +1322,25 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 			0, nullptr);
 	}
 
+	{ // Update grid
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, update_grid_pipeline->pipeline.pipeline);
+		vkCmdPushDescriptorSetWithTemplateKHR(cmd, update_grid_pipeline->pipeline.descriptor_update_template,
+			update_grid_pipeline->pipeline.layout, 0, descriptor_info);
+		vkCmdPushConstants(cmd, update_grid_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push_constants), &push_constants);
+		vkCmdDispatchIndirect(cmd, indirect_dispatch_buffer.buffer, 0);
+
+		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		vkCmdPipelineBarrier(cmd,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			1, &memory_barrier,
+			0, nullptr,
+			0, nullptr);
+	}
+
+#if 1
 	{ // Compact particles
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_compact_pipeline->pipeline.pipeline);
 		vkCmdPushDescriptorSetWithTemplateKHR(cmd, particle_compact_pipeline->pipeline.descriptor_update_template,
@@ -1332,6 +1357,24 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 			0, nullptr,
 			0, nullptr);
 	}
+#else
+	{ // Resolve collisions
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, resolve_collisions_pipeline->pipeline.pipeline);
+		vkCmdPushDescriptorSetWithTemplateKHR(cmd, resolve_collisions_pipeline->pipeline.descriptor_update_template,
+			resolve_collisions_pipeline->pipeline.layout, 0, descriptor_info);
+		vkCmdDispatchIndirect(cmd, indirect_dispatch_buffer.buffer, 0);
+
+		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		vkCmdPipelineBarrier(cmd,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			1, &memory_barrier,
+			0, nullptr,
+			0, nullptr);
+	}
+#endif
 
 	{ // Write indirect draw counts
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_draw_count_pipeline->pipeline.pipeline);
@@ -1381,13 +1424,13 @@ void GPUSurfaceFlowSystem::render(VkCommandBuffer cmd)
 
 	// Likewise for push constants
 	GPUParticlePushConstants push_constants{};
-	push_constants.particle_size = particle_size;
+	push_constants.particle_size = particle_size * 0.1f;
 	push_constants.particle_color = particle_color;
 	push_constants.speed = particle_speed;
 	push_constants.time = time;
 	push_constants.sdf_grid_dims = sdf->dims;
 	push_constants.sdf_grid_spacing = sdf->grid_spacing;
-	push_constants.sdf_origin = sdf->grid_origin + glm::vec3(0.0f, 5.0f, 0.0f);
+	push_constants.sdf_origin = sdf->grid_origin + glm::vec3(0.0f, 25.0f, 0.0f);
 	push_constants.particle_capacity = particle_capacity;
 
 	vkCmdPushConstants(cmd, render_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants), &push_constants);

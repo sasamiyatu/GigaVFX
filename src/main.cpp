@@ -363,8 +363,8 @@ int main(int argc, char** argv)
     surface_flow_system.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
 
     GPUSurfaceFlowSystem flow2;
-    flow2.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 3000,
-        { "surface_flow.hlsl", "emit" }, { "surface_flow.hlsl", "simulate" }, &sdf, true);
+    flow2.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 30000,
+        { "surface_flow.hlsl", "emit" }, { "surface_flow.hlsl", "simulate" }, &sdf, false);
     flow2.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
 
     std::vector<MeshInstance> mesh_draws;

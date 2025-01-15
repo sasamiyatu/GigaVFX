@@ -83,13 +83,15 @@ float sdf(float3 p)
     float3 local_pos = p - bb_min;
     float3 grid_uv = local_pos / extent;
 
-    float d = (sdf_texture.SampleLevel(sdf_sampler, grid_uv, 0)).x;
+    //return sdf_sphere(p, bb_min + extent * 0.5, 0.5 * min(extent.z, min(extent.x, extent.y)));
+
+    float d = (sdf_texture.SampleLevel(sdf_sampler, grid_uv, 0)).x * sdf_scale;
     return d;
 }
 
 float sdf_func(float3 p)
 {
-    return abs(sdf(p));
+    return (sdf(p));
 }
 
 
@@ -142,14 +144,22 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
     float3 point_on_sphere = sample_uniform_sphere(uniform_random(seed).xy);
     GPUParticle p;
     p.velocity = 0;
-    p.lifetime = 100.0;
+    p.lifetime = 10.0;
     
     const float sdf_scale = 0.1;
     float3 bb_min = push_constants.sdf_origin * sdf_scale;
     float3 bb_max = (push_constants.sdf_origin + push_constants.sdf_grid_spacing * float3(push_constants.sdf_grid_dims)) * sdf_scale;
     float3 extent = bb_max - bb_min;
 
-    p.position = float3(bb_min.x + 0.1, bb_min.y + 0.1, bb_min.z + 0.1) + uniform_random(seed).xyz * float3(extent.x - 0.2, 0, extent.z - 0.2);
+    float3 pos = bb_min + extent * (0.1 + 0.8 * uniform_random(seed).xyz);
+    float3 n = sdf_normal(pos);
+    float d = sdf_func(pos);
+    pos -= n * d;
+    p.position = pos;
+    //p.position = float3(bb_min.x + 0.1, bb_min.y + 0.1, bb_min.z + 0.1) + uniform_random(seed).xyz * float3(extent.x - 0.2, 0, extent.z - 0.2);
+    //uint x = thread_id.x % push_constants.sdf_grid_dims.x;
+    //uint z = thread_id.x / push_constants.sdf_grid_dims.x;
+    //p.position = push_constants.sdf_origin + push_constants.sdf_grid_spacing * float3(x + 0.5, 0, z + 0.5) + float3(0, 1, 0);
     particles[global_particle_index + local_index] = p;
 }
 
@@ -172,14 +182,30 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
         float3 n = sdf_normal(p.position);
         float3 to_surface = sdf_func(p.position) > 0.0 ? -n : n;
         float d = sdf_func(p.position);
+        float3 gradient = sdf_gradient(p.position);
 
-        float damping = pow(smoothstep(0, 1, d) * 0.9 + 0.1, push_constants.delta_time * 0.2);
-        float3 attraction = -sdf_gradient(p.position);
+        //float damping = pow(smoothstep(0, 1, d) * 0.9 + 0.1, push_constants.delta_time);
+        float3 attraction = -sdf_gradient(p.position) * 3.0;
 
-        float3 c = curl_noise(p.position, 0);
-        p.velocity += (attraction + curl * 0.1)* push_constants.delta_time * 0.2;
-        p.velocity *= damping;
-        p.position += p.velocity * push_constants.delta_time * 0.2;
+        float3 c = float3(
+            gradient_noise3d(p.position), 
+            gradient_noise3d(p.position + float3(123.4, 5123.1, -1230.5)), 
+            gradient_noise3d(p.position + float3(9812.2, 70124.2, 75912.5))
+        );
+
+        float4 phi = gradient_noise_deriv(p.position);
+        float4 psi = gradient_noise_deriv((p.position +  float3(31.416, -47.853, 12.679)));
+        float3 crossed_grad = cross(n, phi.yzw);
+        //float dotted = dot(normalize(phi), normalize(psi));
+        // if (all(abs(crossed_grad) < 1e-3))
+        // {
+        //     printf("Zero velocity (%f %f %f), phi: (%f %f %f), psi: (%f %f %f) d: %f", crossed_grad.x, crossed_grad.y, crossed_grad.z, phi.y, phi.z, phi.w, psi.y, psi.z, psi.w, dotted);
+        // }
+        p.velocity = crossed_grad;
+        //p.velocity += (attraction + curl * 0.5) * push_constants.delta_time;
+        //if (d < 0.01) p.velocity -= dot(gradient, p.velocity) * gradient;
+        //p.velocity *= 0.99;
+        p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
 
@@ -266,6 +292,10 @@ void update_grid( uint3 thread_id : SV_DispatchThreadID )
     {
         grid_cells[linear_idx * push_constants.max_particles_in_cell + index_in_cell] = thread_id.x;
     }
+    else
+    {
+        //printf("cell (%d %d %d) has too many particles (%d), ac: %d!", cell.x, cell.y, cell.z, index_in_cell, particle_system_state[0].active_particle_count);
+    }
 }
 
 float3 collide_spheres(float3 pa, float3 pb, float3 va, float3 vb)
@@ -274,7 +304,7 @@ float3 collide_spheres(float3 pa, float3 pb, float3 va, float3 vb)
     const float damping = 0.02;
     const float shear = 0.1;
 
-    float3 relative_pos = pa - pb;
+    float3 relative_pos = pb - pa;
     float dist = length(relative_pos);
     float collide_dist = push_constants.particle_size;
 
@@ -285,7 +315,7 @@ float3 collide_spheres(float3 pa, float3 pb, float3 va, float3 vb)
         float3 norm = relative_pos / dist;
 
         // relative velocity
-        float3 relative_vel = va - vb;
+        float3 relative_vel = vb - va;
 
         // relative tangential velocity
         float3 tan_vel = relative_vel - (dot(relative_vel, norm) * norm);
@@ -298,9 +328,11 @@ float3 collide_spheres(float3 pa, float3 pb, float3 va, float3 vb)
         force += shear * tan_vel;
         // // attraction
         // force += attraction * relPos;
-  }
+    } 
 
-  return force;
+    return float3(0, 0, 0);
+
+    return force;
 }
 
 [numthreads(64, 1, 1)]
@@ -308,6 +340,11 @@ void resolve_collisions( uint3 thread_id : SV_DispatchThreadID)
 {
     if (thread_id.x >= particle_system_state[0].active_particle_count)
         return;
+
+    if (thread_id.x == 0)
+    {
+        particle_system_state_out[0].active_particle_count = particle_system_state[0].active_particle_count;
+    }
     
     GPUParticle p = particles[thread_id.x];
 
@@ -339,6 +376,7 @@ void resolve_collisions( uint3 thread_id : SV_DispatchThreadID)
         }
     }
 
+    if (thread_id.x == 0) printf("force: (%f %f %f)", force.x, force.y, force.z);
     p.velocity += force;
     particles_compact_out[thread_id.x] = p;
 }

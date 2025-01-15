@@ -1,4 +1,5 @@
 #include "shared.h"
+#include "noise.hlsli"
 
 [[vk::binding(0)]] cbuffer globals {
     ShaderGlobals globals;
@@ -70,6 +71,8 @@ float sdf_func(in float3 p)
     float3 bb_min = push_constants.grid_origin * scale;
     float3 bb_max = (push_constants.grid_origin + push_constants.grid_spacing * float3(push_constants.grid_dims)) * scale;
     float3 extent = bb_max - bb_min;
+
+    return length(p) - min(extent.z, min(extent.x, extent.y)) * 0.5;
     float3 local_pos = p - bb_min;
     float3 grid_uv = local_pos / extent;
     return sdf_texture.SampleLevel(sdf_sampler, grid_uv, 0).x * scale;
@@ -137,7 +140,10 @@ void test_sdf( uint3 thread_id : SV_DispatchThreadID )
         {
             float3 p = ro + t * rd;
             float3 n = sdf_normal(p);
-            out_texture[thread_id.xy] = float4(n * 0.5 + 0.5, push_constants.grid_dims.x);
+            float4 grad_noise = gradient_noise_deriv(p * 12.0);
+            float3 col = saturate(grad_noise.yzw * 0.5 + 0.5);
+            col = pow(col, 2.2);
+            out_texture[thread_id.xy] = float4(col, 1.0);
         }
     }
 }

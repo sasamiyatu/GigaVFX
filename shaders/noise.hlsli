@@ -25,9 +25,21 @@ float3 hash(uint3 x)
 }
 #endif
 
+float3 hash3( int3 p )     // this hash is not production ready, please
+{                        // replace this by something better
+	int3 n = int3( p.x*127 + p.y*311 + p.z*74,
+                     p.x*269 + p.y*183 + p.z*246,
+                     p.x*113 + p.y*271 + p.z*124);
+
+	// 1D hash by Hugo Elias
+     n = (n << 13) ^ n;
+    n = n * (n * n * 15731 + 789221) + 1376312589;
+    return -1.0+2.0*float3( n & 0x0fffffff)/float(0x0fffffff);
+}
+
 // 0: cubic
 // 1: quintic
-#define INTERPOLANT 0
+#define INTERPOLANT 1
 
 float gradient_noise3d( in float3 p )
 {
@@ -75,14 +87,14 @@ float4 gradient_noise_deriv( in float3 x )
 #endif    
     
      // gradients
-     float3 ga = -1.0 + 2.0 * (float3(pcg3d( i+int3(0,0,0) )) / float(0xFFFFFFFFu));
-     float3 gb = -1.0 + 2.0 * (float3(pcg3d( i+int3(1,0,0) )) / float(0xFFFFFFFFu));
-     float3 gc = -1.0 + 2.0 * (float3(pcg3d( i+int3(0,1,0) )) / float(0xFFFFFFFFu));
-     float3 gd = -1.0 + 2.0 * (float3(pcg3d( i+int3(1,1,0) )) / float(0xFFFFFFFFu));
-     float3 ge = -1.0 + 2.0 * (float3(pcg3d( i+int3(0,0,1) )) / float(0xFFFFFFFFu));
-     float3 gf = -1.0 + 2.0 * (float3(pcg3d( i+int3(1,0,1) )) / float(0xFFFFFFFFu));
-     float3 gg = -1.0 + 2.0 * (float3(pcg3d( i+int3(0,1,1) )) / float(0xFFFFFFFFu));
-     float3 gh = -1.0 + 2.0 * (float3(pcg3d( i+int3(1,1,1) )) / float(0xFFFFFFFFu));
+     float3 ga = hash3( i+int3(0,0,0) );
+     float3 gb = hash3( i+int3(1,0,0) );
+     float3 gc = hash3( i+int3(0,1,0) );
+     float3 gd = hash3( i+int3(1,1,0) );
+     float3 ge = hash3( i+int3(0,0,1) );
+     float3 gf = hash3( i+int3(1,0,1) );
+     float3 gg = hash3( i+int3(0,1,1) );
+     float3 gh = hash3( i+int3(1,1,1) );
     
     // projections
     float va = dot( ga, f-float3(0.0,0.0,0.0) );
@@ -113,7 +125,7 @@ float3 curl_noise(float3 x, float t)
 
      float3 curl = float3(psi3.y - psi2.z, psi1.z - psi3.x, psi2.x - psi1.y);
 #else
-     const int n_octaves = 3;
+     const int n_octaves = 1;
      float w_sum = 0;
      float weight = 1.0;
      float frequency = 1.0;
