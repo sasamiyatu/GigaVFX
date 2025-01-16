@@ -168,12 +168,17 @@ struct TrailBlazerSystem
     struct Context* ctx = nullptr;
     VkBuffer shader_globals = VK_NULL_HANDLE;
     uint32_t particle_capacity = 32678;
+    uint32_t child_particle_capacity = 32678;
+
     float particles_to_spawn = 0.0f;
+    float child_particles_to_spawn = 0.0f;
     float time = 0.0f;
-    float particle_spawn_rate = 1.0f;
+    float particle_spawn_rate = 10.0f;
+    float child_spawn_rate = 10.0f;
     bool first_frame = true;
     bool particles_initialized = false;
     float particle_size = 1.0f;
+    float child_size = 0.1f;
     glm::vec4 particle_color = glm::vec4(1.0f);
     float particle_speed = 1.0f;
 
@@ -182,7 +187,11 @@ struct TrailBlazerSystem
     struct ComputePipelineAsset* particle_dispatch_size_pipeline = nullptr;
     struct ComputePipelineAsset* particle_draw_count_pipeline = nullptr;
     struct ComputePipelineAsset* particle_simulate_pipeline = nullptr;
-    struct ComputePipelineAsset* particle_compact_pipeline = nullptr;
+
+    struct ComputePipelineAsset* child_emit_pipeline = nullptr;
+    struct ComputePipelineAsset* child_simulate_pipeline = nullptr;
+    struct ComputePipelineAsset* child_dispatch_size_pipeline = nullptr;
+    struct ComputePipelineAsset* child_draw_count_pipeline = nullptr;
 
     // Double buffered
     Buffer particle_buffer[2] = {};
@@ -190,6 +199,12 @@ struct TrailBlazerSystem
 
     Buffer indirect_dispatch_buffer = {};
     Buffer indirect_draw_buffer = {};
+
+    Buffer child_particle_buffer[2] = {};
+    Buffer child_particle_system_state[2] = {};
+
+    Buffer child_indirect_dispatch_buffer = {};
+    Buffer child_indirect_draw_buffer = {};
 
     glm::vec3 position = glm::vec3(0.0f);
 };

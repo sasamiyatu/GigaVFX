@@ -17,41 +17,19 @@
 [[vk::binding(5)]] RWStructuredBuffer<DispatchIndirectCommand> indirect_dispatch;
 [[vk::binding(6)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
 
+[[vk::binding(7)]] StructuredBuffer<GPUParticleSystemState> parent_system_state;
+[[vk::binding(8)]] StructuredBuffer<GPUParticle> parent_particles;
+
 [[vk::push_constant]]
-GPUParticlePushConstants push_constants;
+TrailBlazerChildPushConstants push_constants;
 
-static const float3 sphere_center = float3(0, 2, 0);
-static const float sphere_radius = 0.5;
-
-float sdf_sphere(float3 p, float3 center, float radius)
-{
-    return length(p - center) - radius;
-}
-
-float sdf(float3 p)
-{
-    return sdf_sphere(p, sphere_center, sphere_radius);
-}
-
-float sdf_func(float3 p)
-{
-    return (sdf(p));
-}
-
-float3 sdf_normal( in float3 p ) // for function f(p)
-{
-    const float eps = 0.001; // or some other value
-    const float2 h = float2(eps,0);
-    return normalize( float3(sdf_func(p+h.xyy) - sdf_func(p-h.xyy),
-                           sdf_func(p+h.yxy) - sdf_func(p-h.yxy),
-                           sdf_func(p+h.yyx) - sdf_func(p-h.yyx) ) );
-}
 
 
 [numthreads(64, 1, 1)]
 void emit( uint3 thread_id : SV_DispatchThreadID )
 {
-    if (thread_id.x >= push_constants.particles_to_spawn)
+    uint parent_count = parent_system_state[0].active_particle_count;
+    if (thread_id.x >= parent_count)
         return;
 
     if (particle_system_state[0].active_particle_count >= push_constants.particle_capacity)
@@ -65,18 +43,18 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
         InterlockedAdd(particle_system_state[0].active_particle_count, lane_spawn_count, global_particle_index);
 
     global_particle_index = WaveReadLaneFirst(global_particle_index);
-    
-    uint4 seed = uint4(thread_id.x, globals.frame_index, 69, 720);
-    float2 xi = uniform_random(seed).xy;
 
     GPUParticle p;
-    p.velocity = float3(0, 0, 0);
-    p.lifetime = 10.0;
-    p.position = sphere_center;
-    p.color = float4(1, 0, 0, 1);
-    p.size = 0.05;
+    p.velocity = 0;
+    p.lifetime = 0.5;
+    p.size = 0.01f;
+    p.color = float4(0, 1, 0, 1);
+    p.position = parent_particles[thread_id.x].position;
 
-    p.position += sample_uniform_sphere(xi) * sphere_radius;
+    uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
+    float2 xi = uniform_random(seed).xy;
+
+    p.position += sample_uniform_sphere(xi) * 0.01f;
 
     particles[global_particle_index + local_index] = p;
 }
@@ -90,10 +68,8 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
-        float3 n = sdf_normal(p.position);
-        float4 phi = gradient_noise_deriv(p.position);
-        float3 crossed_grad = cross(n, phi.yzw);
-        p.velocity = crossed_grad;
+        p.velocity += (0, -9.8, 0) * push_constants.delta_time;
+        p.size = (p.lifetime / 0.5) * 0.01f;
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
@@ -132,21 +108,19 @@ void write_dispatch( uint3 thread_id : SV_DispatchThreadID )
     indirect_dispatch[0] = command;
 }
 
-[numthreads(64, 1, 1)]
+[numthreads(1, 1, 1)]
 void write_draw( uint3 thread_id : SV_DispatchThreadID )
 {
-    if (thread_id.x >= push_constants.num_slices) return;
+    if (thread_id.x >= 1) return;
 
     uint active_particles = particle_system_state_out[0].active_particle_count;
-    uint draw_count = push_constants.num_slices == 0 
-        ? active_particles
-        : (active_particles + push_constants.num_slices - 1) / push_constants.num_slices;
+    uint draw_count = active_particles;
 
     DrawIndirectCommand draw_cmd;
     draw_cmd.vertexCount = 1;
     draw_cmd.instanceCount = draw_count;
     draw_cmd.firstVertex = 0;
-    draw_cmd.firstInstance = draw_count * thread_id.x;
+    draw_cmd.firstInstance = 0;
 
     indirect_draw[thread_id.x] = draw_cmd;
 }
@@ -212,9 +186,7 @@ PSOutput particle_fs(PSInput input)
     
     float alpha = saturate(1.0 - dist * 2.0);
     float4 in_color = input.color * float4(1, 1, 1, alpha);
-    float NoL = max(0, dot(N, normalize(float3(1, 1, 1))));
-    float3 col = in_color.rgb * NoL;
-    output.color = float4(col, 1.0);
+    output.color = float4(N * 0.5 + 0.5, 1);
 
     return output;
 }

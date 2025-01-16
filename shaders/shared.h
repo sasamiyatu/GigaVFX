@@ -169,8 +169,10 @@ struct GPUParticleSystemState
 struct GPUParticle
 {
     float3 position;
+    float size;
     float3 velocity;
     float lifetime; // alive if > 0
+    float4 color;
 };
 
 struct GPUParticleSort
@@ -184,4 +186,11 @@ struct SDFPushConstants
     uint3 grid_dims;
     float grid_spacing;
     float3 grid_origin;
+};
+
+struct TrailBlazerChildPushConstants
+{
+    uint particles_to_spawn;
+    uint particle_capacity;
+    float delta_time;
 };

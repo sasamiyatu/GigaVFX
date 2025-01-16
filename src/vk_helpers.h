@@ -102,4 +102,14 @@ namespace VkHelpers
 			0, VK_NULL_HANDLE,
 			0, VK_NULL_HANDLE);
 	}
+
+	inline void memory_barrier(VkCommandBuffer cmd, VkPipelineStageFlags src_stage_flags, VkPipelineStageFlags dst_stage_flags,
+		VkAccessFlags src_access, VkAccessFlags dst_access)
+	{
+		VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		barrier.srcAccessMask = src_access;
+		barrier.dstAccessMask = dst_access;
+	
+		vkCmdPipelineBarrier(cmd, src_stage_flags, dst_stage_flags, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+	}
 }
