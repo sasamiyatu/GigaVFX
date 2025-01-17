@@ -111,6 +111,7 @@ struct GPUParticlePushConstants
     uint3 sdf_grid_dims;
     uint particle_capacity;
     uint max_particles_in_cell;
+    uint children_to_emit;
 };
 
 struct GPUParticleSystemGlobals

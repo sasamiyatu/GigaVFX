@@ -44,17 +44,21 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
 
     global_particle_index = WaveReadLaneFirst(global_particle_index);
 
+    GPUParticle parent = parent_particles[thread_id.x];
+
     GPUParticle p;
     p.velocity = 0;
     p.lifetime = 0.5;
-    p.size = 0.01f;
-    p.color = float4(0, 1, 0, 1);
-    p.position = parent_particles[thread_id.x].position;
+    p.size = 0.005f;
+    p.color = float4(0.3, 0.7, 0.3, 0.2);
+    p.color = parent.color;
+    p.position = parent.position;
 
-    uint4 seed = uint4(thread_id.x, globals.frame_index, 42, 1337);
-    float2 xi = uniform_random(seed).xy;
+    uint4 seed = uint4(thread_id.x, thread_id.y, globals.frame_index, 42);
+    float4 xi = uniform_random(seed);
 
-    p.position += sample_uniform_sphere(xi) * 0.01f;
+    p.position += sample_uniform_sphere(xi.xy) * 0.005f;
+    p.position += parent.velocity * (2.0 * xi.z - 1.0) * push_constants.delta_time;
 
     particles[global_particle_index + local_index] = p;
 }

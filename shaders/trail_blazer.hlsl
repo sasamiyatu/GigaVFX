@@ -17,6 +17,8 @@
 [[vk::binding(5)]] RWStructuredBuffer<DispatchIndirectCommand> indirect_dispatch;
 [[vk::binding(6)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
 
+[[vk::binding(7)]] RWStructuredBuffer<DispatchIndirectCommand> children_emit_indirect_dispatch;
+
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;
 
@@ -73,7 +75,7 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
     p.velocity = float3(0, 0, 0);
     p.lifetime = 10.0;
     p.position = sphere_center;
-    p.color = float4(1, 0, 0, 1);
+    p.color = float4(uniform_random(seed).xyz, 0.1);
     p.size = 0.05;
 
     p.position += sample_uniform_sphere(xi) * sphere_radius;
@@ -130,6 +132,15 @@ void write_dispatch( uint3 thread_id : SV_DispatchThreadID )
     command.z = 1;
 
     indirect_dispatch[0] = command;
+
+    DispatchIndirectCommand child_emit_cmd;
+    child_emit_cmd.x = size;
+    child_emit_cmd.y = push_constants.children_to_emit;
+    child_emit_cmd.z = 1;
+
+    children_emit_indirect_dispatch[0] = child_emit_cmd;
+
+    printf("children to emit: %d", push_constants.children_to_emit);
 }
 
 [numthreads(64, 1, 1)]
@@ -211,10 +222,9 @@ PSOutput particle_fs(PSInput input)
     N.z = sqrt(1.0 - mag2);
     
     float alpha = saturate(1.0 - dist * 2.0);
-    float4 in_color = input.color * float4(1, 1, 1, alpha);
-    float NoL = max(0, dot(N, normalize(float3(1, 1, 1))));
-    float3 col = in_color.rgb * NoL;
-    output.color = float4(col, 1.0);
+    float4 col = input.color;
+    col.a *= alpha;
+    output.color = float4(col);
 
     return output;
 }

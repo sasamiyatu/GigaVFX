@@ -1522,9 +1522,10 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 			.set_fragment_shader_filepath("trail_blazer.hlsl", "particle_fs")
 			.set_cull_mode(VK_CULL_MODE_NONE)
 			.add_color_attachment(render_target_format)
+			.set_blend_preset(BlendPreset::ADDITIVE)
 			.set_depth_format(VK_FORMAT_D32_SFLOAT)
 			.set_depth_test(VK_TRUE)
-			.set_depth_write(VK_TRUE)
+			.set_depth_write(VK_FALSE)
 			.set_depth_compare_op(VK_COMPARE_OP_LESS)
 			.set_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST);
 
@@ -1570,7 +1571,14 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
  		}
 	}
 
-	{ // Indirect dispatch buffer
+	{ // Child emit indirect dispatch
+		BufferDesc desc{};
+		desc.size = sizeof(DispatchIndirectCommand);
+		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		child_emit_indirect_dispatch_buffer = ctx->create_buffer(desc);
+	}
+
+	{ // indirect dispatch buffer
 		BufferDesc desc{};
 		desc.size = sizeof(DispatchIndirectCommand);
 		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -1578,7 +1586,7 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		child_indirect_dispatch_buffer = ctx->create_buffer(desc);
 	}
 
-	{ // Indirect draw buffer
+	{ //indirect draw buffer
 		BufferDesc desc{};
 		desc.size = sizeof(DrawIndirectCommand) * MAX_SLICES;
 		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -1627,6 +1635,7 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 			DescriptorInfo(particle_system_state[1].buffer),
 			DescriptorInfo(indirect_dispatch_buffer.buffer),
 			DescriptorInfo(indirect_draw_buffer.buffer),
+			DescriptorInfo(child_emit_indirect_dispatch_buffer.buffer),
 		};
 
 		// Likewise for push constants
@@ -1638,6 +1647,7 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 		push_constants.speed = particle_speed;
 		push_constants.time = time;
 		push_constants.particle_capacity = particle_capacity;
+		push_constants.children_to_emit = child_particles_to_spawn;
 
 		{ // Clear output state
 			vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
@@ -1750,10 +1760,8 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
 		push_constants.particle_capacity = child_particle_capacity;
 
-		uint32_t spawn_count = (uint32_t)child_particles_to_spawn;
-
 		//dispatch(cmd, child_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(spawn_count), 1, 1);
-		dispatch_indirect(cmd, child_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, indirect_dispatch_buffer.buffer, 0);
+		dispatch_indirect(cmd, child_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, child_emit_indirect_dispatch_buffer.buffer, 0);
 		compute_barrier_simple(cmd);
 		dispatch(cmd, child_dispatch_size_pipeline, nullptr, 0, descriptor_info, 1, 1, 1);
 		compute_barrier_simple(cmd);
@@ -1834,6 +1842,7 @@ void TrailBlazerSystem::destroy()
 	ctx->destroy_buffer(indirect_draw_buffer);
 	ctx->destroy_buffer(child_indirect_dispatch_buffer);
 	ctx->destroy_buffer(child_indirect_draw_buffer);
+	ctx->destroy_buffer(child_emit_indirect_dispatch_buffer);
 	for (int i = 0; i < 2; ++i)
 	{
 		ctx->destroy_buffer(particle_buffer[i]);

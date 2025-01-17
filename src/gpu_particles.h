@@ -168,13 +168,13 @@ struct TrailBlazerSystem
     struct Context* ctx = nullptr;
     VkBuffer shader_globals = VK_NULL_HANDLE;
     uint32_t particle_capacity = 32678;
-    uint32_t child_particle_capacity = 32678;
+    uint32_t child_particle_capacity = 524288;
 
     float particles_to_spawn = 0.0f;
     float child_particles_to_spawn = 0.0f;
     float time = 0.0f;
     float particle_spawn_rate = 10.0f;
-    float child_spawn_rate = 10.0f;
+    float child_spawn_rate = 10000.0f;
     bool first_frame = true;
     bool particles_initialized = false;
     float particle_size = 1.0f;
@@ -203,6 +203,7 @@ struct TrailBlazerSystem
     Buffer child_particle_buffer[2] = {};
     Buffer child_particle_system_state[2] = {};
 
+    Buffer child_emit_indirect_dispatch_buffer = {};
     Buffer child_indirect_dispatch_buffer = {};
     Buffer child_indirect_draw_buffer = {};
 
