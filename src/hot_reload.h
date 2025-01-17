@@ -8,12 +8,14 @@ struct IAsset
 {
 	virtual std::filesystem::path get_filepath() const = 0;
 	virtual bool reload_asset() = 0;
+	virtual size_t get_hash() = 0;
 };
 
 struct GraphicsPipelineAsset : IAsset
 {
 	virtual std::filesystem::path get_filepath() const override;
 	virtual bool reload_asset() override;
+	virtual size_t get_hash() override;
 
 	GraphicsPipelineAsset(GraphicsPipelineBuilder build);
 
@@ -26,6 +28,7 @@ struct ComputePipelineAsset : IAsset
 {
 	virtual std::filesystem::path get_filepath() const override;
 	virtual bool reload_asset() override;
+	virtual size_t get_hash() override;
 
 	ComputePipelineAsset(ComputePipelineBuilder build);
 
