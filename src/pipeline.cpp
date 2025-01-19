@@ -97,7 +97,6 @@ void add_shader_stage(GraphicsPipelineBuilder& builder, VkShaderStageFlagBits sh
     stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage_info.stage = shader_stage;
     stage_info.module = VK_NULL_HANDLE;
-    stage_info.pName = entry_point;
 
     builder.pipeline_create_info.stageCount++;
 }
@@ -216,6 +215,7 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
     {
         shader_sources[i].spirv = Shaders::load_shader(shader_sources[i].shader_source, pipeline_create_info.pStages[i].stage, &shader_sources[i].size);
         if (!shader_sources[i].spirv) return false;
+        shader_stage_create_info[i].pName = shader_sources[i].shader_source.entry_point.c_str();
         VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
         info.codeSize = shader_sources[i].size;
         info.pCode = shader_sources[i].spirv;
@@ -394,7 +394,6 @@ ComputePipelineBuilder& ComputePipelineBuilder::set_shader_source(const ShaderSo
 
     stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stage_info.pName = shader_source.shader_source.entry_point.c_str();
 
     create_info.stage = stage_info;
 
@@ -418,6 +417,8 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
     {
         shader_source.spirv = Shaders::load_shader(shader_source.shader_source, VK_SHADER_STAGE_COMPUTE_BIT, &shader_source.size);
         if (!shader_source.spirv) return false;
+
+        create_info.stage.pName = shader_source.shader_source.entry_point.c_str();
 
         VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
         info.codeSize = shader_source.size;

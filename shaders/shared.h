@@ -164,7 +164,9 @@ struct AccelerationStructureInstance
 
 struct GPUParticleSystemState
 {
-    uint active_particle_count;
+    uint active_particle_count; // Also dispatch x
+    uint dispatch_y;
+    uint dispatch_z;
 };
 
 struct GPUParticle

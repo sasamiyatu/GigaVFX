@@ -150,9 +150,9 @@ uint32_t* load_shader(const ShaderSource& shader_source, VkShaderStageFlagBits s
 	std::string shader_src = read_text_file(shader_source.filepath.c_str());
 	if (shader_src.empty()) return nullptr;
 
-	for (const auto& d : shader_source.defines)
+	for (const auto& d : shader_source.prepend_lines)
 	{
-		shader_src.insert(0, "#define " + d.first + " " + d.second + "\n");
+		shader_src.insert(0, d + "\n");
 	}
 	// Add defines
 
@@ -216,17 +216,15 @@ uint32_t* load_shader(const ShaderSource& shader_source, VkShaderStageFlagBits s
 
 void ShaderSource::add_defines(const std::string& first, const std::string& second)
 {
-	if (defines.count(first) != 0)
-	{
-		LOG_WARNING("Defines for shader %s, entry point %s already contains '%s'! Overwriting...",
-			filepath.c_str(), entry_point.c_str(), first.c_str()
-		);
-	}
-
-	defines.insert(std::make_pair(first, second));
+	prepend_lines.push_back("#define " + first + " " + second);
 }
 
 void ShaderSource::add_defines(const std::string& str)
 {
-	add_defines(str, "");
+	prepend_lines.push_back("#define " + str);
+}
+
+void ShaderSource::add_include(const std::string& str)
+{
+	prepend_lines.push_back("#include " + str);
 }

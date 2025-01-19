@@ -1,12 +1,13 @@
 #pragma once
 #include "defines.h"
 #include <map>
+#include <vector>
 
 struct ShaderSource
 {
 	std::string filepath;
 	std::string entry_point;
-	std::map<std::string, std::string> defines;
+	std::vector<std::string> prepend_lines;
 
 	ShaderSource() {};
 	ShaderSource(const char* filepath, const char* entry_point)
@@ -16,6 +17,7 @@ struct ShaderSource
 
 	void add_defines(const std::string& first, const std::string& second);
 	void add_defines(const std::string& str);
+	void add_include(const std::string& str);
 };
 
 namespace Shaders

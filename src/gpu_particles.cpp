@@ -537,9 +537,9 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
-		vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
-		vkCmdFillBuffer(cmd, particle_aabbs.buffer, 0, VK_WHOLE_SIZE, 0);
-		vkCmdFillBuffer(cmd, instances_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+		//vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+		//vkCmdFillBuffer(cmd, particle_aabbs.buffer, 0, VK_WHOLE_SIZE, 0);
+		//vkCmdFillBuffer(cmd, instances_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
 		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1269,7 +1269,7 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
-		vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+		//vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
 		//vkCmdFillBuffer(cmd, grid_counters.buffer, 0, VK_WHOLE_SIZE, 0);
 		//vkCmdFillBuffer(cmd, grid_cells.buffer, 0, VK_WHOLE_SIZE, 0);
 
@@ -1545,7 +1545,8 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		{
 			BufferDesc desc{};
 			desc.size = sizeof(GPUParticleSystemState);
-			desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+			desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | 
+				VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 			particle_system_state[i] = ctx->create_buffer(desc);
 			child_particle_system_state[i] = ctx->create_buffer(desc);
  		}
@@ -1627,9 +1628,10 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 
 		{ // Clear output state
 			vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
-			vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+			//vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
 			vkCmdFillBuffer(cmd, child_particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
-			vkCmdFillBuffer(cmd, child_particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+;			//vkCmdFillBuffer(cmd, child_particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
 
 			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -1639,26 +1641,36 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 		{ // Emit particles
 			dispatch(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
 			compute_barrier_simple(cmd);
+			//VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+			//	VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
 		}
 
+#if 0
 		{ // Write indirect dispatch size
 			dispatch(cmd, particle_dispatch_size_pipeline, &push_constants, sizeof(push_constants), descriptor_info, 1, 1, 1);
 			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
 				VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
 		}
+#endif
 
 		{ // Simulate particles
+			VkHelpers::begin_label(cmd, "Simulate parent", glm::vec4(0.0f, 0.0f, 1.0f, 0.0f));
 			dispatch_indirect(cmd, particle_simulate_pipeline, &push_constants, sizeof(push_constants), descriptor_info, indirect_dispatch_buffer.buffer, 0);
 			compute_barrier_simple(cmd);
+			VkHelpers::end_label(cmd);
 		}
 
+#if 0
 		{ // Write indirect draw counts
+			VkHelpers::begin_label(cmd, "Write draw count", glm::vec4(0.0f, 0.0f, 1.0f, 0.0f));
 			GPUParticlePushConstants pc{};
 			pc.num_slices = 1;
 			dispatch(cmd, particle_draw_count_pipeline, &pc, sizeof(pc), descriptor_info, 1, 1, 1);
 			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
 				VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+			VkHelpers::end_label(cmd);
 		}
+#endif
 	}	
 
 	{ // Child particle system
@@ -1707,7 +1719,7 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 
 void TrailBlazerSystem::render(VkCommandBuffer cmd)
 {
-	VkHelpers::begin_label(cmd, "Trail Blazer", glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
+	VkHelpers::begin_label(cmd, "Trail Blazer render", glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
 
 	// All passes use the same descriptors for now

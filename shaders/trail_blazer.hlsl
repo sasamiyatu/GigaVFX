@@ -56,6 +56,12 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
     if (thread_id.x >= push_constants.particles_to_spawn)
         return;
 
+    if (thread_id.x == 0)
+    {
+        indirect_dispatch[0].y = 1;
+        indirect_dispatch[0].z = 1;
+    }
+
     if (particle_system_state[0].active_particle_count >= push_constants.particle_capacity)
         return;
 
@@ -64,7 +70,11 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
     uint global_particle_index;
 
     if (WaveIsFirstLane())
+    {
         InterlockedAdd(particle_system_state[0].active_particle_count, lane_spawn_count, global_particle_index);
+        uint size = (lane_spawn_count + global_particle_index + 63) / 64;
+        InterlockedMax(indirect_dispatch[0].x, size);
+    }
 
     global_particle_index = WaveReadLaneFirst(global_particle_index);
     
@@ -89,6 +99,25 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     if (thread_id.x >= particle_system_state[0].active_particle_count)
         return;
 
+    if (thread_id.x == 0)
+        printf("state: (%d %d %d)", 
+            particle_system_state[0].active_particle_count, 
+            particle_system_state[0].dispatch_y,
+            particle_system_state[0].dispatch_z);
+
+    if (thread_id.x == 0)
+    {
+        DispatchIndirectCommand child_emit_cmd;
+        child_emit_cmd.x = indirect_dispatch[0].x;
+        child_emit_cmd.y = push_constants.children_to_emit;
+        child_emit_cmd.z = 1;
+        children_emit_indirect_dispatch[0] = child_emit_cmd;
+
+        indirect_draw[0].vertexCount = 1;
+        indirect_draw[0].firstVertex = 0;
+        indirect_draw[0].firstInstance = 0;
+    }
+
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
@@ -110,6 +139,7 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     if (WaveIsFirstLane())
     {
         InterlockedAdd(particle_system_state_out[0].active_particle_count, alive_count, global_particle_index);
+        InterlockedAdd(indirect_draw[0].instanceCount, alive_count);
     }
 
     global_particle_index = WaveReadLaneFirst(global_particle_index);
@@ -131,7 +161,9 @@ void write_dispatch( uint3 thread_id : SV_DispatchThreadID )
     command.y = 1;
     command.z = 1;
 
-    indirect_dispatch[0] = command;
+    printf("dispatch size: %d", size);
+
+    //indirect_dispatch[0] = command;
 
     DispatchIndirectCommand child_emit_cmd;
     child_emit_cmd.x = size;
@@ -224,12 +256,13 @@ PSOutput particle_fs(PSInput input)
     N.z = sqrt(1.0 - mag2);
     
     float alpha = saturate(1.0 - dist * 2.0);
-#ifdef TEST_DEFINE
+#ifdef KEKE
     float4 col = float4(1, 0, 1, 1);
 #else
     float4 col = input.color;
 #endif
     col.a *= alpha;
+    col = float4(1, 0, 1, 1);
     output.color = float4(col);
 
     return output;
