@@ -104,17 +104,28 @@ void add_shader_stage(GraphicsPipelineBuilder& builder, VkShaderStageFlagBits sh
 
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_shader_filepath(const char* filepath, const char* entry_point)
 {
-    shader_sources[pipeline_create_info.stageCount].filepath = filepath;
-    add_shader_stage(*this, VK_SHADER_STAGE_VERTEX_BIT, entry_point);
-    return *this;
+    return set_vertex_shader_source(ShaderSource(filepath, entry_point));
 }
 
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_fragment_shader_filepath(const char* filepath, const char* entry_point)
 {
-    shader_sources[pipeline_create_info.stageCount].filepath = filepath;
-    add_shader_stage(*this, VK_SHADER_STAGE_FRAGMENT_BIT, entry_point);
+    return set_fragment_shader_source(ShaderSource(filepath, entry_point));
+}
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_vertex_shader_source(const ShaderSource& shader_source)
+{
+    shader_sources[pipeline_create_info.stageCount].shader_source = shader_source;
+    add_shader_stage(*this, VK_SHADER_STAGE_VERTEX_BIT, shader_sources[pipeline_create_info.stageCount].shader_source.entry_point.c_str());
     return *this;
 }
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_fragment_shader_source(const ShaderSource& shader_source)
+{
+    shader_sources[pipeline_create_info.stageCount].shader_source = shader_source;
+    add_shader_stage(*this, VK_SHADER_STAGE_FRAGMENT_BIT, shader_sources[pipeline_create_info.stageCount].shader_source.entry_point.c_str());
+    return *this;
+}
+
 
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout)
 {
@@ -203,7 +214,7 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
 
     for (size_t i = 0; i < pipeline_create_info.stageCount; ++i)
     {
-        shader_sources[i].spirv = Shaders::load_shader(shader_sources[i].filepath, pipeline_create_info.pStages[i].pName, pipeline_create_info.pStages[i].stage, &shader_sources[i].size);
+        shader_sources[i].spirv = Shaders::load_shader(shader_sources[i].shader_source, pipeline_create_info.pStages[i].stage, &shader_sources[i].size);
         if (!shader_sources[i].spirv) return false;
         VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
         info.codeSize = shader_sources[i].size;
@@ -372,13 +383,18 @@ void GraphicsPipelineBuilder::destroy_resources(Pipeline& pipeline)
 
 ComputePipelineBuilder& ComputePipelineBuilder::set_shader_filepath(const char* filepath, const char* entry_point)
 {
-    shader_source.filepath = filepath;
+    return set_shader_source(ShaderSource(filepath, entry_point));
+}
+
+ComputePipelineBuilder& ComputePipelineBuilder::set_shader_source(const ShaderSource& src)
+{
+    shader_source.shader_source = src;
 
     VkPipelineShaderStageCreateInfo stage_info{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
 
     stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stage_info.pName = entry_point;
+    stage_info.pName = shader_source.shader_source.entry_point.c_str();
 
     create_info.stage = stage_info;
 
@@ -400,7 +416,7 @@ bool ComputePipelineBuilder::build(Pipeline* out_pipeline)
     std::vector<VkDescriptorUpdateTemplateEntry> descriptor_template_entries;
 
     {
-        shader_source.spirv = Shaders::load_shader(shader_source.filepath, create_info.stage.pName, VK_SHADER_STAGE_COMPUTE_BIT, &shader_source.size);
+        shader_source.spirv = Shaders::load_shader(shader_source.shader_source, VK_SHADER_STAGE_COMPUTE_BIT, &shader_source.size);
         if (!shader_source.spirv) return false;
 
         VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };

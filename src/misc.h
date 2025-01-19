@@ -41,3 +41,23 @@ inline uint8_t* read_entire_file(const char* filepath, size_t* size)
 
     return data;
 }
+
+inline std::string read_text_file(const char* filepath)
+{
+    FILE* f = fopen(filepath, "rb");
+    if (!f)
+    {
+        LOG_ERROR("Failed to open file %s", filepath);
+        return std::string();
+    }
+
+    fseek(f, 0, SEEK_END);
+    long filesize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t* data = (uint8_t*)malloc(filesize);
+    assert(data);
+    size_t bytes_read = fread(data, 1, filesize, f);
+    assert(bytes_read == filesize);
+
+    return std::string((const char*)data, (size_t)filesize);
+}

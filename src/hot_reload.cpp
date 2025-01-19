@@ -66,7 +66,7 @@ GraphicsPipelineAsset::GraphicsPipelineAsset(GraphicsPipelineBuilder build)
 		exit(1);
 	}
 
-	shader_path = builder.shader_sources[0].filepath;
+	shader_path = builder.shader_sources[0].shader_source.filepath;
 }
 
 struct RegisteredAsset
@@ -178,5 +178,5 @@ ComputePipelineAsset::ComputePipelineAsset(ComputePipelineBuilder build)
 	if (!builder.build(&pipeline))
 		exit(1);
 
-	shader_path = builder.shader_source.filepath;
+	shader_path = builder.shader_source.shader_source.filepath;
 }

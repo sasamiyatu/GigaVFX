@@ -1493,10 +1493,13 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 	this->particle_capacity = particle_capacity;
 
 	{ // Render pipeline
+		ShaderSource fragment_source("trail_blazer.hlsl", "particle_fs");
+		fragment_source.add_defines("TEST_DEFINE");
 		GraphicsPipelineBuilder builder(ctx->device, true);
 		builder
 			.set_vertex_shader_filepath("trail_blazer.hlsl")
-			.set_fragment_shader_filepath("trail_blazer.hlsl", "particle_fs")
+			//.set_fragment_shader_filepath("trail_blazer.hlsl", "particle_fs")
+			.set_fragment_shader_source(fragment_source)
 			.set_cull_mode(VK_CULL_MODE_NONE)
 			.add_color_attachment(render_target_format)
 			.set_blend_preset(BlendPreset::ADDITIVE)

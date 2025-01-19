@@ -224,7 +224,11 @@ PSOutput particle_fs(PSInput input)
     N.z = sqrt(1.0 - mag2);
     
     float alpha = saturate(1.0 - dist * 2.0);
+#ifdef TEST_DEFINE
+    float4 col = float4(1, 0, 1, 1);
+#else
     float4 col = input.color;
+#endif
     col.a *= alpha;
     output.color = float4(col);
 

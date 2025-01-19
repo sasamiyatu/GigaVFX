@@ -2,6 +2,7 @@
 
 #include "defines.h"
 #include "spirv_reflect.h"
+#include "shaders.h"
 
 enum class BlendPreset
 {
@@ -71,7 +72,7 @@ struct GraphicsPipelineBuilder
     {
         uint32_t* spirv;
         uint32_t size;
-        const char* filepath;
+        ShaderSource shader_source;
     } shader_sources[max_shader_stages];
 
     VkPipelineVertexInputStateCreateInfo vertex_input_state = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
@@ -108,8 +109,14 @@ struct GraphicsPipelineBuilder
     GraphicsPipelineBuilder& set_depth_compare_op(VkCompareOp op);
     GraphicsPipelineBuilder& set_layout(VkPipelineLayout layout);
     GraphicsPipelineBuilder& set_cull_mode(VkCullModeFlagBits cull_mode);
+    GraphicsPipelineBuilder& set_vertex_shader_source(const ShaderSource& shader_source);
+    GraphicsPipelineBuilder& set_fragment_shader_source(const ShaderSource& shader_source);
+
+    // Deprecated
     GraphicsPipelineBuilder& set_vertex_shader_filepath(const char* filepath, const char* entry_point = "vs_main");
+    // Deprecated
     GraphicsPipelineBuilder& set_fragment_shader_filepath(const char* filepath, const char* entry_point = "fs_main");
+
     GraphicsPipelineBuilder& set_descriptor_set_layout(uint32_t set_index, VkDescriptorSetLayout layout);
     GraphicsPipelineBuilder& set_view_mask(uint32_t mask);
     GraphicsPipelineBuilder& set_topology(VkPrimitiveTopology topology);
@@ -128,7 +135,7 @@ struct ComputePipelineBuilder
     struct {
         uint32_t* spirv;
         uint32_t size;
-        const char* filepath;
+        ShaderSource shader_source;
     } shader_source;
     static const uint32_t max_descriptor_set_layouts = 4;
 
@@ -136,7 +143,10 @@ struct ComputePipelineBuilder
     bool set_layout_passed_from_outside[max_descriptor_set_layouts] = { false };
     uint32_t descriptor_set_layout_count = 0;
 
+    // Deprecated
     ComputePipelineBuilder& set_shader_filepath(const char* filepath, const char* entry_point = "cs_main");
+
+    ComputePipelineBuilder& set_shader_source(const ShaderSource& shader_source);
     ComputePipelineBuilder(VkDevice device, bool enable_shader_hot_reload);
 
     bool build(Pipeline* pipeline);
