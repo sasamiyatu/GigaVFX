@@ -23,7 +23,7 @@
 [[vk::push_constant]]
 TrailBlazerChildPushConstants push_constants;
 
-
+static const float lifetime = 0.2f;
 
 [numthreads(64, 1, 1)]
 void emit( uint3 thread_id : SV_DispatchThreadID )
@@ -48,8 +48,8 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
 
     GPUParticle p;
     p.velocity = 0;
-    p.lifetime = 0.5;
-    p.size = 0.005f;
+    p.lifetime = lifetime;
+    p.size = 0.007f;
     p.color = float4(0.3, 0.7, 0.3, 0.2);
     p.color = parent.color;
     p.position = parent.position;
@@ -57,8 +57,10 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
     uint4 seed = uint4(thread_id.x, thread_id.y, globals.frame_index, 42);
     float4 xi = uniform_random(seed);
 
-    p.position += sample_uniform_sphere(xi.xy) * 0.005f;
+    float3 pos_in_sphere = sample_uniform_sphere(xi.xy);
+    //p.position += pos_in_sphere * 0.005f;
     p.position += parent.velocity * (2.0 * xi.z - 1.0) * push_constants.delta_time;
+    p.velocity = pos_in_sphere * 0.005f;
 
     particles[global_particle_index + local_index] = p;
 }
@@ -73,9 +75,10 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     if (p.lifetime > 0.0)
     {
         p.velocity += (0, -9.8, 0) * push_constants.delta_time;
-        p.size = (p.lifetime / 0.5) * 0.01f;
+        p.size = (p.lifetime / lifetime) * 0.01f;
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
+        p.color.a = saturate(p.lifetime / lifetime);
     }
 
     bool alive = p.lifetime > 0.0;
@@ -108,6 +111,10 @@ void write_dispatch( uint3 thread_id : SV_DispatchThreadID )
     command.x = size;
     command.y = 1;
     command.z = 1;
+
+    if (particle_system_state[0].active_particle_count > push_constants.particle_capacity)
+        printf("WARNING: System trail blazer child low on capacity! (%d / %d)", 
+            particle_system_state[0].active_particle_count,  push_constants.particle_capacity);
 
     indirect_dispatch[0] = command;
 }

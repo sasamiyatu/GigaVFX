@@ -112,4 +112,20 @@ namespace VkHelpers
 	
 		vkCmdPipelineBarrier(cmd, src_stage_flags, dst_stage_flags, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 	}
+
+	inline void begin_label(VkCommandBuffer cmd, const char* name, glm::vec4 color)
+	{
+		VkDebugUtilsLabelEXT label_info{ VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT };
+		label_info.pLabelName = name;
+		label_info.color[0] = 0.0f;
+		label_info.color[1] = 0.0f;
+		label_info.color[2] = 1.0f;
+		label_info.color[3] = 1.0f;
+		vkCmdBeginDebugUtilsLabelEXT(cmd, &label_info);
+	}
+
+	inline void end_label(VkCommandBuffer cmd)
+	{
+		vkCmdEndDebugUtilsLabelEXT(cmd);
+	}
 }

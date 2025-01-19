@@ -228,17 +228,7 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		BufferDesc desc{};
 		desc.size = sizeof(GPUParticleSystemGlobals);
 		desc.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-		desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-		system_globals = ctx->create_buffer(desc);
-
-		GPUParticleSystemGlobals globals{};
-		globals.particle_capacity = particle_capacity;
-		globals.transform = glm::mat4(1.0f);
-
-		void* mapped;
-		vmaMapMemory(ctx->allocator, system_globals.allocation, &mapped);
-		memcpy(mapped, &globals, sizeof(globals));
-		vmaUnmapMemory(ctx->allocator, system_globals.allocation);
+		system_globals = ctx->create_gpu_buffer(desc);
 	}
 
 	{ // Particles buffer
@@ -440,6 +430,8 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& camera_state, glm::mat4 shadow_view, glm::mat4 shadow_projection)
 {
+	VkHelpers::begin_label(cmd, "Particle system simulate", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+
 	dt = glm::clamp(dt, 0.0f, MAX_DELTA_TIME);
 	particles_to_spawn += particle_spawn_rate * dt;
 	time += dt;
@@ -473,27 +465,16 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		globals.light_resolution = glm::uvec2(light_buffer_size, light_buffer_size);
 
 		void* mapped;
-		vmaMapMemory(ctx->allocator, system_globals.allocation, &mapped);
+		ctx->map_buffer(system_globals, &mapped);
 		memcpy(mapped, &globals, sizeof(globals));
-		vmaUnmapMemory(ctx->allocator, system_globals.allocation);
+		ctx->unmap_buffer(system_globals);
+		ctx->upload_buffer(system_globals, cmd);
+
+		VkHelpers::memory_barrier(cmd,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
 	}
 
-	if (!first_frame)
-	{ // TODO: This performance timing stuff is probably incorrect when multiple frames are in flight
-		uint64_t query_results[4];
-		vkGetQueryPoolResults(ctx->device, query_pool, 0, 4, sizeof(query_results), query_results, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
-		uint64_t diff = query_results[1] - query_results[0];
-		double nanoseconds = ctx->physical_device.properties.limits.timestampPeriod * diff;
-		performance_timings.simulate_total = glm::mix(nanoseconds, performance_timings.simulate_total, 0.95);
-
-		uint64_t delta_render = query_results[3] - query_results[2];
-		double ns_render = ctx->physical_device.properties.limits.timestampPeriod * delta_render;
-		performance_timings.render_total = glm::mix(ns_render, performance_timings.render_total, 0.95);
-	}
-
-	vkCmdResetQueryPool(cmd, query_pool, 0, 256);
-
-	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, query_pool, 0);
 	if (!particles_initialized)
 	{ // Zero init buffers
 		for (int i = 0; i < 2; ++i)
@@ -518,7 +499,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	// All passes use the same descriptors for now
 	DescriptorInfo descriptor_info[] = {
 		DescriptorInfo(shader_globals),
-		DescriptorInfo(system_globals.buffer),
+		DescriptorInfo(system_globals),
 		DescriptorInfo(particle_buffer[0].buffer),
 		DescriptorInfo(particle_system_state[0].buffer),
 		DescriptorInfo(particle_buffer[1].buffer),
@@ -778,19 +759,17 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 
 	particles_to_spawn -= std::floor(particles_to_spawn);
 
-	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool, 1);
-
 	// Swap buffers
 	std::swap(particle_system_state[0], particle_system_state[1]);
 	std::swap(particle_buffer[0], particle_buffer[1]);
 
 	first_frame = false;
+
+	VkHelpers::end_label(cmd);
 }
 
 void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 {
-	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, query_pool, 2);
-
 	{ // Transition render targets
 		VkImageMemoryBarrier2 barriers[2] = {
 			VkHelpers::image_memory_barrier2
@@ -828,13 +807,7 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 			char marker_name[64];
 			sprintf(marker_name, "Light slice %u", slice);
 
-			VkDebugUtilsLabelEXT label_info{ VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT };
-			label_info.pLabelName = marker_name;
-			label_info.color[0] = 0.0f;
-			label_info.color[1] = 0.0f;
-			label_info.color[2] = 1.0f;
-			label_info.color[3] = 1.0f;
-			vkCmdBeginDebugUtilsLabelEXT(cmd, &label_info);
+			VkHelpers::begin_label(cmd, marker_name, glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
 
 			VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 			color_info.imageView = light_render_target.view;
@@ -867,7 +840,7 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline_light->pipeline.pipeline);
 			DescriptorInfo descriptor_info[] = {
 				DescriptorInfo(shader_globals),
-				DescriptorInfo(system_globals.buffer),
+				DescriptorInfo(system_globals),
 				DescriptorInfo(particle_buffer[0].buffer),
 				DescriptorInfo(particle_system_state[0].buffer),
 				DescriptorInfo(particle_buffer[1].buffer),
@@ -893,7 +866,7 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 
 			vkCmdEndRendering(cmd);
 
-			vkCmdEndDebugUtilsLabelEXT(cmd);
+			VkHelpers::end_label(cmd);
 		};
 
 	auto render_slice_view = [&](uint32_t slice, bool flipped)
@@ -901,13 +874,7 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 			char marker_name[64];
 			sprintf(marker_name, "View slice %u", slice);
 
-			VkDebugUtilsLabelEXT label_info{ VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT };
-			label_info.pLabelName = marker_name;
-			label_info.color[0] = 0.0f;
-			label_info.color[1] = 1.0f;
-			label_info.color[2] = 0.0f;
-			label_info.color[3] = 1.0f;
-			vkCmdBeginDebugUtilsLabelEXT(cmd, &label_info);
+			VkHelpers::begin_label(cmd, marker_name, glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
 
 			VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 			color_info.imageView = particle_render_target.view;
@@ -941,7 +908,7 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
 			DescriptorInfo descriptor_info[] = {
 				DescriptorInfo(shader_globals),
-				DescriptorInfo(system_globals.buffer),
+				DescriptorInfo(system_globals),
 				DescriptorInfo(particle_buffer[0].buffer),
 				DescriptorInfo(particle_system_state[0].buffer),
 				DescriptorInfo(particle_buffer[1].buffer),
@@ -967,7 +934,7 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 
 			vkCmdEndRendering(cmd);
 
-			vkCmdEndDebugUtilsLabelEXT(cmd);
+			VkHelpers::end_label(cmd);
 		};
 
 	{ // Clear light buffer
@@ -994,12 +961,11 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 		render_slice_view(i, draw_order_flipped);
 		VkHelpers::fragment_barrier_simple(cmd);
 	}
-
-	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool, 3);
 }
 
 void GPUParticleSystem::composite(VkCommandBuffer cmd, const Texture& render_target)
 {
+	VkHelpers::begin_label(cmd, "Half angle slice composite", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
 	{ // Composite
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_composite_pipeline->pipeline.pipeline);
 		DescriptorInfo descriptor_info[] = {
@@ -1022,6 +988,8 @@ void GPUParticleSystem::composite(VkCommandBuffer cmd, const Texture& render_tar
 			0, nullptr,
 			0, nullptr);
 	}
+
+	VkHelpers::end_label(cmd);
 }
 
 void GPUParticleSystem::destroy()
@@ -1076,7 +1044,7 @@ void GPUParticleSystem::draw_stats_overlay()
 	ImGui::End();
 }
 
-void GPUParticleSystem::draw_ui()
+void GPUParticleSystem::draw_config_ui()
 {
 	if (ImGui::InputFloat("emission rate", &particle_spawn_rate, 100.0f, 10000.0f))
 	{
@@ -1243,6 +1211,8 @@ void GPUSurfaceFlowSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat 
 
 void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 {
+	VkHelpers::begin_label(cmd, "Surface Flow simulate", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+
 	dt = glm::clamp(dt, 0.0f, MAX_DELTA_TIME);
 	particles_to_spawn += particle_spawn_rate * dt;
 	time += dt;
@@ -1300,8 +1270,8 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
 		vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
-		vkCmdFillBuffer(cmd, grid_counters.buffer, 0, VK_WHOLE_SIZE, 0);
-		vkCmdFillBuffer(cmd, grid_cells.buffer, 0, VK_WHOLE_SIZE, 0);
+		//vkCmdFillBuffer(cmd, grid_counters.buffer, 0, VK_WHOLE_SIZE, 0);
+		//vkCmdFillBuffer(cmd, grid_cells.buffer, 0, VK_WHOLE_SIZE, 0);
 
 		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1369,6 +1339,7 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 			0, nullptr);
 	}
 
+#if 0
 	{ // Update grid
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, update_grid_pipeline->pipeline.pipeline);
 		vkCmdPushDescriptorSetWithTemplateKHR(cmd, update_grid_pipeline->pipeline.descriptor_update_template,
@@ -1386,6 +1357,7 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 			0, nullptr,
 			0, nullptr);
 	}
+#endif
 
 #if 1
 	{ // Compact particles
@@ -1450,10 +1422,13 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 	std::swap(particle_buffer[0], particle_buffer[1]);
 
 	first_frame = false;
+
+	VkHelpers::end_label(cmd);
 }
 
 void GPUSurfaceFlowSystem::render(VkCommandBuffer cmd)
 {
+	VkHelpers::begin_label(cmd, "Surface Flow", glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
 
 	// All passes use the same descriptors for now
@@ -1483,6 +1458,8 @@ void GPUSurfaceFlowSystem::render(VkCommandBuffer cmd)
 	vkCmdPushConstants(cmd, render_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants), &push_constants);
 	vkCmdPushDescriptorSetWithTemplateKHR(cmd, render_pipeline->pipeline.descriptor_update_template, render_pipeline->pipeline.layout, 0, descriptor_info);
 	vkCmdDrawIndirect(cmd, indirect_draw_buffer.buffer, 0, 1, sizeof(DrawIndirectCommand));
+
+	VkHelpers::end_label(cmd);
 }
 
 void GPUSurfaceFlowSystem::destroy()
@@ -1597,6 +1574,8 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 {
+	VkHelpers::begin_label(cmd, "Trail Blazer simulate", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+
 	dt = glm::clamp(dt, 0.0f, MAX_DELTA_TIME);
 	particles_to_spawn += particle_spawn_rate * dt;
 	child_particles_to_spawn += child_spawn_rate * dt;
@@ -1612,20 +1591,14 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 			vkCmdFillBuffer(cmd, child_particle_system_state[i].buffer, 0, VK_WHOLE_SIZE, 0);
 		}
 
-		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-		vkCmdPipelineBarrier(cmd,
+		VkHelpers::memory_barrier(cmd,
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			0,
-			1, &memory_barrier,
-			0, nullptr,
-			0, nullptr);
+			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 
 		particles_initialized = true;
 	}
 
-	{
+	{ // Parent particle system
 		// All passes use the same descriptors for now
 		DescriptorInfo descriptor_info[] = {
 			DescriptorInfo(shader_globals),
@@ -1640,7 +1613,7 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 
 		// Likewise for push constants
 		GPUParticlePushConstants push_constants{};
-		push_constants.delta_time = time > 5.0f ? dt : 0.0f;
+		push_constants.delta_time = dt;
 		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
 		push_constants.particle_size = particle_size * 0.1f;
 		push_constants.particle_color = particle_color;
@@ -1655,89 +1628,33 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 			vkCmdFillBuffer(cmd, child_particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
 			vkCmdFillBuffer(cmd, child_particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
 
-			VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-			memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				0,
-				1, &memory_barrier,
-				0, nullptr,
-				0, nullptr);
+			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_ACCESS_TRANSFER_WRITE_BIT,
+				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 		}
 
 		{ // Emit particles
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_emit_pipeline->pipeline.pipeline);
-			vkCmdPushDescriptorSetWithTemplateKHR(cmd, particle_emit_pipeline->pipeline.descriptor_update_template,
-				particle_emit_pipeline->pipeline.layout, 0, descriptor_info);
-
-			vkCmdPushConstants(cmd, particle_emit_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push_constants), &push_constants);
-			vkCmdDispatch(cmd, get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
-
-			VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-			memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				0,
-				1, &memory_barrier,
-				0, nullptr,
-				0, nullptr);
+			dispatch(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
+			compute_barrier_simple(cmd);
 		}
 
 		{ // Write indirect dispatch size
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_dispatch_size_pipeline->pipeline.pipeline);
-			vkCmdPushDescriptorSetWithTemplateKHR(cmd, particle_dispatch_size_pipeline->pipeline.descriptor_update_template,
-				particle_dispatch_size_pipeline->pipeline.layout, 0, descriptor_info);
-			vkCmdDispatch(cmd, 1, 1, 1);
-
-			VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-			memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			memory_barrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-				0,
-				1, &memory_barrier,
-				0, nullptr,
-				0, nullptr);
+			dispatch(cmd, particle_dispatch_size_pipeline, &push_constants, sizeof(push_constants), descriptor_info, 1, 1, 1);
+			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+				VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
 		}
 
 		{ // Simulate particles
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_simulate_pipeline->pipeline.pipeline);
-			vkCmdPushDescriptorSetWithTemplateKHR(cmd, particle_simulate_pipeline->pipeline.descriptor_update_template,
-				particle_simulate_pipeline->pipeline.layout, 0, descriptor_info);
-			vkCmdPushConstants(cmd, particle_simulate_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push_constants), &push_constants);
-			vkCmdDispatchIndirect(cmd, indirect_dispatch_buffer.buffer, 0);
-
-			VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-			memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				0,
-				1, &memory_barrier,
-				0, nullptr,
-				0, nullptr);
+			dispatch_indirect(cmd, particle_simulate_pipeline, &push_constants, sizeof(push_constants), descriptor_info, indirect_dispatch_buffer.buffer, 0);
+			compute_barrier_simple(cmd);
 		}
 
 		{ // Write indirect draw counts
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_draw_count_pipeline->pipeline.pipeline);
-			vkCmdPushDescriptorSetWithTemplateKHR(cmd, particle_draw_count_pipeline->pipeline.descriptor_update_template,
-				particle_draw_count_pipeline->pipeline.layout, 0, descriptor_info);
 			GPUParticlePushConstants pc{};
 			pc.num_slices = 1;
-			vkCmdPushConstants(cmd, particle_draw_count_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
-			vkCmdDispatch(cmd, 1, 1, 1);
-
-			VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-			memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			memory_barrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-				0,
-				1, &memory_barrier,
-				0, nullptr,
-				0, nullptr);
+			dispatch(cmd, particle_draw_count_pipeline, &pc, sizeof(pc), descriptor_info, 1, 1, 1);
+			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+				VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
 		}
 	}	
 
@@ -1756,7 +1673,7 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 
 		TrailBlazerChildPushConstants push_constants{};
 
-		push_constants.delta_time = time > 5.0f ? dt : 0.0f;
+		push_constants.delta_time = dt;
 		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
 		push_constants.particle_capacity = child_particle_capacity;
 
@@ -1781,10 +1698,13 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 	std::swap(child_particle_buffer[0], child_particle_buffer[1]);
 
 	first_frame = false;
+
+	VkHelpers::end_label(cmd);
 }
 
 void TrailBlazerSystem::render(VkCommandBuffer cmd)
 {
+	VkHelpers::begin_label(cmd, "Trail Blazer", glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
 
 	// All passes use the same descriptors for now
@@ -1823,6 +1743,8 @@ void TrailBlazerSystem::render(VkCommandBuffer cmd)
 		vkCmdPushDescriptorSetWithTemplateKHR(cmd, render_pipeline->pipeline.descriptor_update_template, render_pipeline->pipeline.layout, 0, descriptor_info);
 		vkCmdDrawIndirect(cmd, child_indirect_draw_buffer.buffer, 0, 1, sizeof(DrawIndirectCommand));
 	}
+
+	VkHelpers::end_label(cmd);
 }
 
 void TrailBlazerSystem::destroy()
@@ -1850,4 +1772,21 @@ void TrailBlazerSystem::destroy()
 		ctx->destroy_buffer(child_particle_buffer[i]);
 		ctx->destroy_buffer(child_particle_system_state[i]);
 	}
+}
+
+void TrailBlazerSystem::draw_config_ui()
+{
+	if (ImGui::InputFloat("parent emission rate", &particle_spawn_rate, 1.0f, 100.0f))
+	{
+		particle_spawn_rate = std::clamp(particle_spawn_rate, 0.0f, 10000000.0f);
+	}
+	if (ImGui::InputFloat("child emission rate", &child_spawn_rate, 100.0f, 10000.0f))
+	{
+		child_spawn_rate = std::clamp(child_spawn_rate, 0.0f, 10000000.0f);
+	}
+}
+
+const char* TrailBlazerSystem::get_display_name()
+{
+	return "Trail Blazer";
 }

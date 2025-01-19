@@ -25,13 +25,15 @@ void Context::init(int window_width, int window_height)
     vkb::InstanceBuilder instance_builder;
     instance_builder.require_api_version(1, 3, 0);
     instance_builder.set_app_name("GigaVFX");
+    instance_builder.enable_extensions({
+    VK_KHR_SURFACE_EXTENSION_NAME,
+    VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+        });
+#if _DEBUG
     instance_builder.request_validation_layers();
     instance_builder.enable_validation_layers();
     instance_builder.add_validation_feature_enable(VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT);
-    instance_builder.enable_extensions({
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-    });
+
     instance_builder.set_debug_messenger_severity(
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
         | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
@@ -66,6 +68,10 @@ void Context::init(int window_width, int window_height)
             return VK_FALSE;
         }
     );
+#else
+    // Want to be able to use labels in release builds
+    instance_builder.enable_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+#endif
 
     vkb::Result<vkb::Instance> instance_result = instance_builder.build();
     if (!instance_result)
@@ -489,8 +495,9 @@ VkCommandBuffer Context::begin_frame()
     return cmd;
 }
 
-void Context::end_frame(VkCommandBuffer command_buffer)
+void Context::end_frame (VkCommandBuffer command_buffer)
 {
+    VkHelpers::begin_label(command_buffer, "End frame", glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
     VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     VkSubmitInfo info{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -522,12 +529,14 @@ void Context::end_frame(VkCommandBuffer command_buffer)
 
     vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_pool[frame_index], 1);
 
+    VkHelpers::end_label(command_buffer);
+
     vkEndCommandBuffer(command_buffer);
 
     VK_CHECK(vkQueueSubmit(graphics_queue, 1, &info, frame_fences[frame_index]));
 
     // For debugging sync issues
-    vkQueueWaitIdle(graphics_queue);
+    //vkQueueWaitIdle(graphics_queue);
 
     VkPresentInfoKHR present_info{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     present_info.waitSemaphoreCount = 1;
@@ -811,6 +820,7 @@ Buffer Context::create_buffer(const BufferDesc& desc, size_t alignment)
     Buffer result{};
     result.buffer = buffer;
     result.allocation = allocation;
+    result.size = desc.size;
     return result;
 }
 
@@ -819,6 +829,55 @@ void Context::destroy_buffer(Buffer& buffer)
     vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
     buffer.allocation = VK_NULL_HANDLE;
     buffer.buffer = VK_NULL_HANDLE;
+}
+
+GPUBuffer Context::create_gpu_buffer(const BufferDesc& desc, size_t alignment)
+{
+    GPUBuffer buffer{};
+
+    {
+        BufferDesc copy = desc;
+        copy.usage_flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        copy.allocation_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        for (uint32_t i = 0; i < frames_in_flight; ++i)
+            buffer.staging_buffers[i] = create_buffer(copy, alignment);
+    }
+
+    BufferDesc copy = desc;
+    copy.usage_flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    buffer.gpu_buffer = create_buffer(copy, alignment);
+
+    return buffer;
+}
+
+void Context::destroy_buffer(GPUBuffer& buffer)
+{
+    for (uint32_t i = 0; i < frames_in_flight; ++i)
+        destroy_buffer(buffer.staging_buffers[i]);
+
+    destroy_buffer(buffer.gpu_buffer);
+}
+
+void Context::map_buffer(const GPUBuffer& gpu, void** mapped)
+{
+    vmaMapMemory(allocator, gpu.staging_buffers[frame_index].allocation, mapped);
+}
+
+void Context::unmap_buffer(const GPUBuffer& buffer)
+{
+    vmaUnmapMemory(allocator, buffer.staging_buffers[frame_index].allocation);
+}
+
+void Context::upload_buffer(const GPUBuffer& buffer, VkCommandBuffer cmd)
+{
+    assert(buffer.gpu_buffer.size == buffer.staging_buffers[frame_index].size);
+
+    VkBufferCopy copy{};
+    copy.dstOffset = 0;
+    copy.srcOffset = 0;
+    copy.size = buffer.gpu_buffer.size;
+
+    vkCmdCopyBuffer(cmd, buffer.staging_buffers[frame_index].buffer, buffer.gpu_buffer.buffer, 1, &copy);
 }
 
 VkCommandBuffer Context::allocate_and_begin_command_buffer()

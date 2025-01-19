@@ -322,8 +322,9 @@ int main(int argc, char** argv)
     BufferDesc desc{};
     desc.size = sizeof(ShaderGlobals);
     desc.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-    Buffer globals_buffer = ctx.create_buffer(desc);
+    //desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    //Buffer globals_buffer = ctx.create_buffer(desc);
+    GPUBuffer globals_buffer = ctx.create_gpu_buffer(desc);
 
     CameraState camera;
     float yaw = 0.0f;
@@ -345,30 +346,35 @@ int main(int argc, char** argv)
     texture_catalog.init(&ctx, "data/textures/");
 
     ParticleRenderer particle_renderer;
-    particle_renderer.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT);
+    particle_renderer.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT);
     particle_renderer.texture_catalog = &texture_catalog;
 
     ParticleSystemManager particle_system_manager;
     particle_system_manager.init(&particle_renderer);
 
+    std::vector<IConfigUI*> config_uis;
     constexpr uint32_t particle_capacity = 1048576;
     GPUParticleSystem smoke_system;
-    smoke_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, particle_capacity, shadowmap_texture, 1,
+    smoke_system.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT, particle_capacity, shadowmap_texture, 1,
         {"gpu_particles.hlsl", "cs_emit_particles"}, {"gpu_particles.hlsl", "cs_simulate_particles"}, &sdf);
     smoke_system.set_position(glm::vec3(0.0f, 0.0f, 0.0f));
+    config_uis.push_back(&smoke_system);
 
     GPUParticleSystem surface_flow_system;
-    surface_flow_system.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 3000, shadowmap_texture, 1,
+    surface_flow_system.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT, 3000, shadowmap_texture, 1,
         { "gpu_particles.hlsl", "emit_sphere" }, { "gpu_particles.hlsl", "update_simple" }, &sdf, true);
     surface_flow_system.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
+    config_uis.push_back(&surface_flow_system);
 
     GPUSurfaceFlowSystem flow2;
-    flow2.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT, 30000,
+    flow2.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT, 30000,
         { "surface_flow.hlsl", "emit" }, { "surface_flow.hlsl", "simulate" }, &sdf, false);
     flow2.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
+    config_uis.push_back(&flow2);
 
     TrailBlazerSystem trail_blazer;
-    trail_blazer.init(&ctx, globals_buffer.buffer, RENDER_TARGET_FORMAT);
+    trail_blazer.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT);
+    config_uis.push_back(&trail_blazer);
 
     std::vector<MeshInstance> mesh_draws;
 
@@ -397,6 +403,8 @@ int main(int argc, char** argv)
         VkCommandBuffer command_buffer = ctx.begin_frame();
         Texture& swapchain_texture = ctx.get_swapchain_texture();
 
+        VkHelpers::begin_label(command_buffer, "Frame start", glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
+
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
@@ -406,7 +414,22 @@ int main(int argc, char** argv)
             ImGui::Text("Frame time: %f ms", ctx.smoothed_frame_time_ns * 1e-6f);
             ImGui::Text("Particle simulate: %f us", smoke_system.performance_timings.simulate_total * 1e-3f);
             ImGui::Text("Particle render: %f us", smoke_system.performance_timings.render_total * 1e-3f);
-            smoke_system.draw_ui();
+            ImGui::Separator();
+            static int selected_system = 0;
+            if (ImGui::BeginCombo("Particle system", config_uis[selected_system]->get_display_name()))
+            {
+                for (int i = 0; i < config_uis.size(); ++i)
+                {
+                    if (ImGui::Selectable(config_uis[i]->get_display_name(), selected_system == i))
+                    {
+                        selected_system = i;
+                    }
+                }
+
+                ImGui::EndCombo();
+            }
+            config_uis[selected_system]->draw_config_ui();
+            //smoke_system.draw_config_ui();
             ImGui::End();
         }
 
@@ -607,10 +630,18 @@ int main(int argc, char** argv)
             }
 
             void* mapped;
-            vmaMapMemory(ctx.allocator, globals_buffer.allocation, &mapped);
+            ctx.map_buffer(globals_buffer, &mapped);
+            //vmaMapMemory(ctx.allocator, globals_buffer.allocation, &mapped);
             memcpy(mapped, &globals, sizeof(globals));
-            vmaUnmapMemory(ctx.allocator, globals_buffer.allocation);
+            ctx.unmap_buffer(globals_buffer);
+            ctx.upload_buffer(globals_buffer, command_buffer);
+            VkHelpers::memory_barrier(command_buffer,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                VK_ACCESS_TRANSFER_WRITE_BIT, 0);
+            //vmaUnmapMemory(ctx.allocator, globals_buffer.allocation);
         }
+
+        VkHelpers::end_label(command_buffer);
 
         smoke_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
         surface_flow_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
@@ -654,8 +685,10 @@ int main(int argc, char** argv)
         }
 
         { // Procedural sky box
+            VkHelpers::begin_label(command_buffer, "Procedural sky box", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+           
             DescriptorInfo descriptor_info[] = {
-                DescriptorInfo(globals_buffer.buffer),
+                DescriptorInfo(globals_buffer),
                 DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL)
             };
 
@@ -666,10 +699,12 @@ int main(int argc, char** argv)
             uint32_t dispatch_x = get_golden_dispatch_size(WINDOW_WIDTH);
             uint32_t dispatch_y = get_golden_dispatch_size(WINDOW_HEIGHT);
             vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
+
+            VkHelpers::end_label(command_buffer);
         }
 
         { // Shadowmap
-
+            VkHelpers::begin_label(command_buffer, "Cascaded shadow map", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
             VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 0,
@@ -715,7 +750,7 @@ int main(int argc, char** argv)
 
             DescriptorInfo descriptor_info[] = {
                 DescriptorInfo(anisotropic_sampler),
-                DescriptorInfo(globals_buffer.buffer),
+                DescriptorInfo(globals_buffer),
                 DescriptorInfo(materials_buffer.buffer)
             };
 
@@ -747,9 +782,13 @@ int main(int argc, char** argv)
             }
 
             vkCmdEndRendering(command_buffer);
+
+            VkHelpers::end_label(command_buffer);
         }
 
         { // Depth prepass
+            VkHelpers::begin_label(command_buffer, "Depth prepass", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+
             VkRenderingAttachmentInfo depth_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             depth_info.imageView = depth_texture.view;
             depth_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
@@ -773,7 +812,7 @@ int main(int argc, char** argv)
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_prepass->pipeline.pipeline);
 
             DescriptorInfo descriptor_info[] = {
-                DescriptorInfo(globals_buffer.buffer),
+                DescriptorInfo(globals_buffer),
             };
 
             vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, depth_prepass->pipeline.descriptor_update_template, 
@@ -822,12 +861,16 @@ int main(int argc, char** argv)
             dependency_info.pImageMemoryBarriers = &image_barrier;
 
             vkCmdPipelineBarrier2(command_buffer, &dependency_info);
+
+            VkHelpers::end_label(command_buffer);
         }
 
         smoke_system.render(command_buffer, depth_texture);
         surface_flow_system.render(command_buffer, depth_texture);
 
         { // Forward pass
+            VkHelpers::begin_label(command_buffer, "Forward pass", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             color_info.imageView = hdr_render_target.view;
             color_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -862,7 +905,7 @@ int main(int argc, char** argv)
 
             DescriptorInfo descriptor_info[] = {
                 DescriptorInfo(anisotropic_sampler),
-                DescriptorInfo(globals_buffer.buffer),
+                DescriptorInfo(globals_buffer),
                 DescriptorInfo(materials_buffer.buffer),
                 DescriptorInfo(shadowmap_texture.view, VK_IMAGE_LAYOUT_GENERAL),
                 DescriptorInfo(shadow_sampler),
@@ -895,6 +938,8 @@ int main(int argc, char** argv)
                     vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
                 }
             }
+
+            VkHelpers::end_label(command_buffer);
         }
 
         flow2.render(command_buffer);
@@ -904,8 +949,9 @@ int main(int argc, char** argv)
 
 #if 1
         { // SDF test
+            VkHelpers::begin_label(command_buffer, "SDF test", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
             DescriptorInfo desc_info[] = {
-                DescriptorInfo(globals_buffer.buffer),
+                DescriptorInfo(globals_buffer),
                 DescriptorInfo(bilinear_sampler),
                 DescriptorInfo(sdf.texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
                 DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
@@ -922,6 +968,8 @@ int main(int argc, char** argv)
             vkCmdDispatch(command_buffer, (WINDOW_WIDTH + 7) / 8, (WINDOW_HEIGHT + 7) / 8, 1);
 
             VkHelpers::full_barrier(command_buffer);
+
+            VkHelpers::end_label(command_buffer);
         }
 #endif
 
@@ -942,6 +990,8 @@ int main(int argc, char** argv)
 #endif
 
         {
+            VkHelpers::begin_label(command_buffer, "Tonemap", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+
             DescriptorInfo descriptor_info[] = {
                 DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
                 DescriptorInfo(swapchain_texture.view, VK_IMAGE_LAYOUT_GENERAL)
@@ -957,9 +1007,13 @@ int main(int argc, char** argv)
             uint32_t dispatch_x = get_golden_dispatch_size(WINDOW_WIDTH);
             uint32_t dispatch_y = get_golden_dispatch_size(WINDOW_HEIGHT);
             vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
+
+            VkHelpers::end_label(command_buffer);
         }
 
         {
+            VkHelpers::begin_label(command_buffer, "ImGui render", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+
             // ImGui rendering
             VkRenderingAttachmentInfo color_info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             color_info.imageView = swapchain_texture.view;
@@ -991,6 +1045,8 @@ int main(int argc, char** argv)
             ImGui_ImplVulkan_RenderDrawData(draw_data, command_buffer);
 
             vkCmdEndRendering(command_buffer);
+
+            VkHelpers::end_label(command_buffer);
         }
 
         ctx.end_frame(command_buffer);
@@ -1013,8 +1069,8 @@ int main(int argc, char** argv)
         vmaDestroyBuffer(ctx.allocator, m.texcoord0.buffer, m.texcoord0.allocation);
         vmaDestroyBuffer(ctx.allocator, m.texcoord1.buffer, m.texcoord1.allocation);
     }
-    vmaDestroyBuffer(ctx.allocator, materials_buffer.buffer, materials_buffer.allocation);
-    vmaDestroyBuffer(ctx.allocator, globals_buffer.buffer, globals_buffer.allocation);
+    ctx.destroy_buffer(materials_buffer);
+    ctx.destroy_buffer(globals_buffer);
     vkDestroySampler(ctx.device, anisotropic_sampler, nullptr);
     vkDestroySampler(ctx.device, bilinear_sampler, nullptr);
     vkDestroySampler(ctx.device, shadow_sampler, nullptr);

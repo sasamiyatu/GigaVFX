@@ -7,6 +7,7 @@
 
 struct Buffer;
 struct BufferDesc;
+struct GPUBuffer;
 
 struct Context
 {
@@ -74,8 +75,15 @@ struct Context
     Buffer create_buffer(const BufferDesc& desc, size_t alignment = 0);
     void destroy_buffer(Buffer& buffer);
 
+    GPUBuffer create_gpu_buffer(const BufferDesc& desc, size_t alignment = 0);
+    void destroy_buffer(GPUBuffer& buffer);
+    void map_buffer(const GPUBuffer& buffer, void** mapped);
+    void unmap_buffer(const GPUBuffer& buffer);
+    void upload_buffer(const GPUBuffer& buffer, VkCommandBuffer cmd);
+
     VkCommandBuffer allocate_and_begin_command_buffer();
     void end_command_buffer_submit_and_free(VkCommandBuffer cmd);
 
     VkDeviceAddress buffer_device_address(const Buffer& buffer);
 };
+

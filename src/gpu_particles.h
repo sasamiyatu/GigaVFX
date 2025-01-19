@@ -18,7 +18,13 @@ struct ShaderInfo
 
 struct SDF;
 
-struct GPUParticleSystem
+struct IConfigUI
+{
+    virtual void draw_config_ui() {}
+    virtual const char* get_display_name() { return "NONAME"; }
+};
+
+struct GPUParticleSystem : IConfigUI
 {
     void init(struct Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity,
         const Texture& shadowmap_texture, uint32_t cascade_index, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, 
@@ -29,15 +35,18 @@ struct GPUParticleSystem
     void composite(VkCommandBuffer cmd, const Texture& render_target);
     void destroy();
     void draw_stats_overlay();
-    void draw_ui(); // Draws into the currently active imgui window
     void set_position(glm::vec3 pos) { position = pos; }
+
+    // IConfigUI
+    virtual void draw_config_ui() override; // Draws into the currently active imgui window
+    virtual const char* get_display_name() override { return "Smoke"; };
 
     bool first_frame = true;
     bool one_time_emit = false;
 
     struct Context* ctx = nullptr;
     VkBuffer shader_globals = VK_NULL_HANDLE;
-    Buffer system_globals = {};
+    GPUBuffer system_globals = {};
 
     // Double buffered
     Buffer particle_buffer[2] = {};
@@ -109,7 +118,7 @@ struct GPUParticleSystem
     } performance_timings;
 };
 
-struct GPUSurfaceFlowSystem
+struct GPUSurfaceFlowSystem : IConfigUI
 {
     void init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, const SDF* sdf, bool emit_once = false);
     void simulate(VkCommandBuffer cmd, float dt);
@@ -157,13 +166,17 @@ struct GPUSurfaceFlowSystem
     glm::vec3 position = glm::vec3(0.0f);
 };
 
-struct TrailBlazerSystem
+struct TrailBlazerSystem : IConfigUI
 {
     void init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format);
     void simulate(VkCommandBuffer cmd, float dt);
     void render(VkCommandBuffer cmd);
     void destroy();
     void set_position(glm::vec3 pos) { position = pos; }
+
+    // IConfigUI
+    virtual void draw_config_ui() override;
+    virtual const char* get_display_name() override;
 
     struct Context* ctx = nullptr;
     VkBuffer shader_globals = VK_NULL_HANDLE;

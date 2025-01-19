@@ -73,7 +73,7 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
 
     GPUParticle p;
     p.velocity = float3(0, 0, 0);
-    p.lifetime = 10.0;
+    p.lifetime = 0.2;
     p.position = sphere_center;
     p.color = float4(uniform_random(seed).xyz, 0.1);
     p.size = 0.05;
@@ -95,7 +95,7 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
         float3 n = sdf_normal(p.position);
         float4 phi = gradient_noise_deriv(p.position);
         float3 crossed_grad = cross(n, phi.yzw);
-        p.velocity = crossed_grad;
+        p.velocity = crossed_grad * 2.0;
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
@@ -138,9 +138,11 @@ void write_dispatch( uint3 thread_id : SV_DispatchThreadID )
     child_emit_cmd.y = push_constants.children_to_emit;
     child_emit_cmd.z = 1;
 
-    children_emit_indirect_dispatch[0] = child_emit_cmd;
+    if (particle_system_state[0].active_particle_count > push_constants.particle_capacity)
+        printf("WARNING: System trail blazer low on capacity! (%d / %d)", 
+            particle_system_state[0].active_particle_count,  push_constants.particle_capacity);
 
-    printf("children to emit: %d", push_constants.children_to_emit);
+    children_emit_indirect_dispatch[0] = child_emit_cmd;
 }
 
 [numthreads(64, 1, 1)]

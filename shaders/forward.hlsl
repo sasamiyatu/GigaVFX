@@ -35,7 +35,7 @@ struct VSOutput
 [[vk::binding(4)]] SamplerComparisonState shadow_sampler;
 [[vk::binding(5)]] SamplerState point_sampler;
 [[vk::binding(6)]] Texture2D particle_light_texture;
-[[vk::binding(7)]] StructuredBuffer<float4x4> transforms;
+//[[vk::binding(7)]] StructuredBuffer<float4x4> transforms;
 
 [[vk::push_constant]]
 PushConstantsForward push_constants;
@@ -44,7 +44,8 @@ VSOutput vs_main(VSInput input)
 {
     VSOutput output = (VSOutput)0;
     float3 pos = vk::RawBufferLoad<float3>(push_constants.position_buffer + input.vertex_id * 12);
-    float4x4 model = USE_INSTANCING ? transforms[input.instance_id] : push_constants.model;
+    //float4x4 model = USE_INSTANCING ? transforms[input.instance_id] : push_constants.model;
+    float4x4 model = push_constants.model;
     float3 world_pos = mul(model, float4(pos, 1.0)).xyz;
     float3 normal = push_constants.normal_buffer ? vk::RawBufferLoad<float3>(push_constants.normal_buffer + input.vertex_id * 12) : float3(0.0, 0.0, 1.0);
     
