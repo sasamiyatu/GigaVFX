@@ -1,5 +1,7 @@
 #pragma once
 
+#include "math.hlsli"
+
 // https://www.pcg-random.org/
 uint pcg(uint v)
 {
@@ -56,4 +58,26 @@ uint4 pcg4d(inout uint4 seed)
 float4 uniform_random(inout uint4 seed)
 {
     return float4(pcg4d(seed)) / float(0xFFFFFFFFu);
+}
+
+float4 sample_uniform(inout uint4 seed, float range_min, float range_max)
+{
+    return uniform_random(seed) * (range_max - range_min) + range_min;
+}
+
+float4 sample_gaussian(inout uint4 seed, float mean = 0, float std_dev = 1)
+{
+    // Box-Muller transform
+    float4 r = uniform_random(seed);
+
+    float2 s1 = float2(sqrt(-2 * log(r.x)), TWO_PI * r.y);
+    float2 s2 = float2(sqrt(-2 * log(r.z)), TWO_PI * r.w);
+
+    float4 gaussian;
+    gaussian.x = s1.x * cos(s1.y);
+    gaussian.y = s1.x * sin(s1.y);
+    gaussian.z = s2.x * cos(s2.y);
+    gaussian.w = s2.x * sin(s2.y);
+
+    return gaussian * std_dev + mean;
 }

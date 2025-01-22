@@ -2,6 +2,8 @@
 #include "defines.h"
 #include "buffer.h"
 #include "radix_sort.h"
+#include "sdf.h"
+#include "pipeline.h"
 
 struct AccelerationStructure
 {
@@ -94,6 +96,8 @@ struct GPUParticleSystem : IConfigUI
     float time = 0.0f;
     glm::vec3 color_attenuation = glm::vec3(1.0f);
     uint32_t light_buffer_size;
+    glm::vec3 smoke_dir = glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 smoke_origin = glm::vec3(0.0f);
 
     Texture particle_render_target;
     Texture light_render_target;
@@ -148,8 +152,6 @@ struct GPUSurfaceFlowSystem : IConfigUI
     struct ComputePipelineAsset* particle_draw_count_pipeline = nullptr;
     struct ComputePipelineAsset* particle_simulate_pipeline = nullptr;
     struct ComputePipelineAsset* particle_compact_pipeline = nullptr;
-    struct ComputePipelineAsset* update_grid_pipeline = nullptr;
-    struct ComputePipelineAsset* resolve_collisions_pipeline = nullptr;
 
     // Double buffered
     Buffer particle_buffer[2] = {};
@@ -197,14 +199,15 @@ struct TrailBlazerSystem : IConfigUI
 
     struct GraphicsPipelineAsset* render_pipeline = nullptr;
     struct ComputePipelineAsset* particle_emit_pipeline = nullptr;
-    struct ComputePipelineAsset* particle_dispatch_size_pipeline = nullptr;
-    struct ComputePipelineAsset* particle_draw_count_pipeline = nullptr;
     struct ComputePipelineAsset* particle_simulate_pipeline = nullptr;
 
     struct ComputePipelineAsset* child_emit_pipeline = nullptr;
     struct ComputePipelineAsset* child_simulate_pipeline = nullptr;
     struct ComputePipelineAsset* child_dispatch_size_pipeline = nullptr;
     struct ComputePipelineAsset* child_draw_count_pipeline = nullptr;
+
+    SDF* sdf;
+    VkSampler sdf_sampler;
 
     // Double buffered
     Buffer particle_buffer[2] = {};
@@ -216,9 +219,80 @@ struct TrailBlazerSystem : IConfigUI
     Buffer child_particle_buffer[2] = {};
     Buffer child_particle_system_state[2] = {};
 
-    Buffer child_emit_indirect_dispatch_buffer = {};
+    GPUBuffer child_emit_indirect_dispatch_buffer = {};
     Buffer child_indirect_dispatch_buffer = {};
     Buffer child_indirect_draw_buffer = {};
 
     glm::vec3 position = glm::vec3(0.0f);
+};
+
+struct ParticleSystemSimple : IConfigUI
+{
+    struct Config
+    {
+        std::string name;
+        uint32_t particle_capacity;
+        float spawn_rate;
+        std::string emit_and_simulate_file;
+		std::vector<DescriptorInfo> additional_descriptors;
+        bool emit_indirect_dispatch_handled_externally = false;
+    };
+
+    void init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, const Config& cfg);
+
+    void pre_update(VkCommandBuffer cmd, float dt);
+    void emit(VkCommandBuffer cmd, float dt);
+    void update(VkCommandBuffer cmd, float dt);
+    void post_update(VkCommandBuffer cmd, float dt);
+
+    // Calls emit + update with added barriers
+    void simulate(VkCommandBuffer cmd, float dt);
+
+    void render(VkCommandBuffer cmd);
+    void destroy();
+
+    // ConfigUI
+    virtual void draw_config_ui() override;
+    virtual const char* get_display_name() override;
+
+    Config config = {};
+    
+    struct Context* ctx = nullptr;
+    VkBuffer shader_globals = VK_NULL_HANDLE;
+
+    bool particles_initialized = false;
+
+    float particles_to_spawn = 0.0f;
+    float time = 0.0f;
+
+    bool emit_indirect_dispatch_handled_externally = false;
+
+    struct GraphicsPipelineAsset* render_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_emit_pipeline = nullptr;
+    struct ComputePipelineAsset* particle_simulate_pipeline = nullptr;
+
+    // Double buffered
+    Buffer particle_buffer[2] = {};
+    Buffer particle_system_state[2] = {};
+
+    GPUBuffer emit_indirect_dispatch_buffer = {};
+    Buffer indirect_dispatch_buffer = {};
+    Buffer indirect_draw_buffer = {};
+
+    std::vector<DescriptorInfo> descriptors;
+};
+
+struct ParticleManagerSimple
+{
+    std::vector<ParticleSystemSimple*> systems;
+    Context* ctx;
+    VkBuffer globals_buffer;
+	VkFormat render_target_format;
+    bool initialized = false;
+
+	void init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format);
+    ParticleSystemSimple* add_system(const ParticleSystemSimple::Config& cfg);
+    void update_systems(VkCommandBuffer cmd, float dt);
+    void render_systems(VkCommandBuffer cmd);
+    void destroy();
 };

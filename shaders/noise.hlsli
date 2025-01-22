@@ -125,7 +125,7 @@ float3 curl_noise(float3 x, float t)
 
      float3 curl = float3(psi3.y - psi2.z, psi1.z - psi3.x, psi2.x - psi1.y);
 #else
-     const int n_octaves = 1;
+     const int n_octaves = 3;
      float w_sum = 0;
      float weight = 1.0;
      float frequency = 1.0;

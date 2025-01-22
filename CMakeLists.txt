@@ -17,6 +17,7 @@ add_executable(gigavfx
     src/buffer.h
     src/camera.h
     src/cgltf.h
+    src/colors.h
     src/defines.h
     src/gltf.h
     src/gltf.cpp
@@ -50,6 +51,8 @@ add_executable(gigavfx
     src/texture.cpp
     src/texture_catalog.h
     src/texture_catalog.cpp
+    src/timer.h
+    src/timer.cpp
     src/VkBootstrap.h
     src/VkBootstrap.cpp
     src/VkBootstrapDispatch.h

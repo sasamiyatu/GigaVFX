@@ -211,11 +211,50 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
     for (uint32_t i = 0; i < max_descriptor_set_layouts; ++i)
         descriptor_set_mask |= (int)set_layout_passed_from_outside[i] << i;
 
+    std::vector<uint8_t> spec_constant_data[4];
+	std::vector<VkSpecializationMapEntry> specialization_entries[4];
+    VkSpecializationInfo specialization_info[4];
+
     for (size_t i = 0; i < pipeline_create_info.stageCount; ++i)
     {
         shader_sources[i].spirv = Shaders::load_shader(shader_sources[i].shader_source, pipeline_create_info.pStages[i].stage, &shader_sources[i].size);
         if (!shader_sources[i].spirv) return false;
         shader_stage_create_info[i].pName = shader_sources[i].shader_source.entry_point.c_str();
+
+		for (const auto& sc : shader_sources[i].shader_source.specialization_constants)
+		{
+			VkSpecializationMapEntry entry{};
+			entry.constantID = sc.constant_id;
+			entry.offset = spec_constant_data[i].size();
+            switch (sc.type)
+            {
+			case ShaderSource::SpecializationConstantEntry::Type::BOOL:
+				entry.size = sizeof(VkBool32);
+				break;
+			case ShaderSource::SpecializationConstantEntry::Type::UINT:
+				entry.size = sizeof(uint32_t);
+				break;
+			case ShaderSource::SpecializationConstantEntry::Type::FLOAT:
+				entry.size = sizeof(float);
+                break;
+            default:
+                assert(false);
+            }
+
+			spec_constant_data[i].resize(spec_constant_data[i].size() + entry.size);
+			memcpy(spec_constant_data[i].data() + entry.offset, &sc.bool_val, entry.size);
+			specialization_entries[i].push_back(entry);
+		}
+
+        if (specialization_entries[i].size() != 0)
+        {
+            specialization_info[i].mapEntryCount = specialization_entries[i].size();
+            specialization_info[i].pMapEntries = specialization_entries[i].data();
+            specialization_info[i].dataSize = spec_constant_data[i].size();
+            specialization_info[i].pData = spec_constant_data[i].data();
+            shader_stage_create_info[i].pSpecializationInfo = &specialization_info[i];
+        }
+
         VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
         info.codeSize = shader_sources[i].size;
         info.pCode = shader_sources[i].spirv;

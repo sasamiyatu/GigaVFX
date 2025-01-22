@@ -20,6 +20,8 @@ struct DescriptorInfo
         VkAccelerationStructureKHR acceleration_structure;
     };
 
+    inline DescriptorInfo() {}
+
     inline DescriptorInfo(VkSampler sampler)
     {
         image_info = {};

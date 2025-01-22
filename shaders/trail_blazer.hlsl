@@ -19,8 +19,11 @@
 
 [[vk::binding(7)]] RWStructuredBuffer<DispatchIndirectCommand> children_emit_indirect_dispatch;
 
+[[vk::binding(8)]] Texture3D sdf_texture;
+[[vk::binding(9)]] SamplerState sdf_sampler;
+
 [[vk::push_constant]]
-GPUParticlePushConstants push_constants;
+TrailBlazerPushConstants push_constants;
 
 static const float3 sphere_center = float3(0, 2, 0);
 static const float sphere_radius = 0.5;
@@ -32,6 +35,14 @@ float sdf_sphere(float3 p, float3 center, float radius)
 
 float sdf(float3 p)
 {
+    const float scale = 1.1;
+    float3 sdf_origin = push_constants.sdf_origin * scale;
+    float3 sdf_extent = push_constants.sdf_dims * push_constants.sdf_spacing * scale;
+
+    float3 p_sdf = p - sdf_origin;
+    float3 coord = p_sdf / sdf_extent;
+
+    //return sdf_texture.SampleLevel(sdf_sampler, coord, 0).x * scale;
     return sdf_sphere(p, sphere_center, sphere_radius);
 }
 
@@ -84,11 +95,18 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p;
     p.velocity = float3(0, 0, 0);
     p.lifetime = 0.2;
-    p.position = sphere_center;
     p.color = float4(uniform_random(seed).xyz, 0.1);
     p.size = 0.05;
 
-    p.position += sample_uniform_sphere(xi) * sphere_radius;
+    //p.position += sample_uniform_sphere(xi) * sphere_radius;
+    //float3 sdf_extent = push_constants.sdf_dims * push_constants.sdf_spacing;
+    //p.position = (push_constants.sdf_origin + (uniform_random(seed).x * 0.9 + 0.05) * sdf_extent) * 1.1;
+    p.position = sphere_center + sample_uniform_sphere(xi) * sphere_radius;
+    
+    float3 n = sdf_normal(p.position);
+    float d = sdf_func(p.position);
+
+    p.position -= d * n;
 
     particles[global_particle_index + local_index] = p;
 }
@@ -100,18 +118,12 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
         return;
 
     if (thread_id.x == 0)
-        printf("state: (%d %d %d)", 
-            particle_system_state[0].active_particle_count, 
-            particle_system_state[0].dispatch_y,
-            particle_system_state[0].dispatch_z);
-
-    if (thread_id.x == 0)
     {
-        DispatchIndirectCommand child_emit_cmd;
-        child_emit_cmd.x = indirect_dispatch[0].x;
-        child_emit_cmd.y = push_constants.children_to_emit;
-        child_emit_cmd.z = 1;
-        children_emit_indirect_dispatch[0] = child_emit_cmd;
+        // DispatchIndirectCommand child_emit_cmd;
+        // child_emit_cmd.x = indirect_dispatch[0].x;
+        // child_emit_cmd.y = push_constants.children_to_emit;
+        // child_emit_cmd.z = 1;
+        // children_emit_indirect_dispatch[0] = child_emit_cmd;
 
         indirect_draw[0].vertexCount = 1;
         indirect_draw[0].firstVertex = 0;
@@ -149,51 +161,6 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
         uint index = global_particle_index + local_index;
         particles_compact_out[index] = p;
     }
-}
-
-[numthreads(1, 1, 1)]
-void write_dispatch( uint3 thread_id : SV_DispatchThreadID )
-{
-    uint size = (particle_system_state[0].active_particle_count + 63) / 64;
-
-    DispatchIndirectCommand command;
-    command.x = size;
-    command.y = 1;
-    command.z = 1;
-
-    printf("dispatch size: %d", size);
-
-    //indirect_dispatch[0] = command;
-
-    DispatchIndirectCommand child_emit_cmd;
-    child_emit_cmd.x = size;
-    child_emit_cmd.y = push_constants.children_to_emit;
-    child_emit_cmd.z = 1;
-
-    if (particle_system_state[0].active_particle_count > push_constants.particle_capacity)
-        printf("WARNING: System trail blazer low on capacity! (%d / %d)", 
-            particle_system_state[0].active_particle_count,  push_constants.particle_capacity);
-
-    children_emit_indirect_dispatch[0] = child_emit_cmd;
-}
-
-[numthreads(64, 1, 1)]
-void write_draw( uint3 thread_id : SV_DispatchThreadID )
-{
-    if (thread_id.x >= push_constants.num_slices) return;
-
-    uint active_particles = particle_system_state_out[0].active_particle_count;
-    uint draw_count = push_constants.num_slices == 0 
-        ? active_particles
-        : (active_particles + push_constants.num_slices - 1) / push_constants.num_slices;
-
-    DrawIndirectCommand draw_cmd;
-    draw_cmd.vertexCount = 1;
-    draw_cmd.instanceCount = draw_count;
-    draw_cmd.firstVertex = 0;
-    draw_cmd.firstInstance = draw_count * thread_id.x;
-
-    indirect_draw[thread_id.x] = draw_cmd;
 }
 
 struct VSInput
@@ -256,13 +223,10 @@ PSOutput particle_fs(PSInput input)
     N.z = sqrt(1.0 - mag2);
     
     float alpha = saturate(1.0 - dist * 2.0);
-#ifdef KEKE
-    float4 col = float4(1, 0, 1, 1);
-#else
+
     float4 col = input.color;
-#endif
     col.a *= alpha;
-    col = float4(1, 0, 1, 1);
+
     output.color = float4(col);
 
     return output;

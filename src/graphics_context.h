@@ -79,7 +79,7 @@ struct Context
     void destroy_buffer(GPUBuffer& buffer);
     void map_buffer(const GPUBuffer& buffer, void** mapped);
     void unmap_buffer(const GPUBuffer& buffer);
-    void upload_buffer(const GPUBuffer& buffer, VkCommandBuffer cmd);
+    void upload_buffer(const GPUBuffer& buffer, VkCommandBuffer cmd, uint32_t offset = 0, uint32_t size = 0);
 
     VkCommandBuffer allocate_and_begin_command_buffer();
     void end_command_buffer_submit_and_free(VkCommandBuffer cmd);

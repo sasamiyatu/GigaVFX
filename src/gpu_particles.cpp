@@ -7,6 +7,7 @@
 #include "camera.h"
 #include "vk_helpers.h"
 #include "sdf.h"
+#include "colors.h"
 
 constexpr VkFormat PARTICLE_RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr VkFormat LIGHT_RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -25,6 +26,17 @@ static ComputePipelineAsset* create_pipeline(Context* ctx, const char* shader_sr
 
 	return pipeline;
 }
+
+static ComputePipelineAsset* create_pipeline(Context* ctx, const ShaderSource& shader_source)
+{
+	ComputePipelineBuilder builder(ctx->device, true);
+	builder.set_shader_source(shader_source);
+	ComputePipelineAsset* pipeline = new ComputePipelineAsset(builder);
+	AssetCatalog::register_asset(pipeline);
+
+	return pipeline;
+}
+
 
 static void dispatch(VkCommandBuffer cmd, ComputePipelineAsset* pipeline, void* push_constants, size_t push_constant_size, void* descriptor_info,
 	uint32_t dispatch_x, uint32_t dispatch_y, uint32_t dispatch_z)
@@ -523,7 +535,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.particle_size = particle_size;
 	push_constants.particle_color = particle_color;
 	push_constants.sort_axis = particle_sort_axis;
-	push_constants.blas_address = VkHelpers::get_acceleration_structure_device_address(ctx->device, blas.acceleration_structure);
 	push_constants.emitter_radius = emitter_radius;
 	push_constants.speed = particle_speed;
 	push_constants.time = time;
@@ -534,6 +545,9 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.sdf_grid_spacing = sdf->grid_spacing;
 	push_constants.sdf_origin = sdf->grid_origin + glm::vec3(0.0f, 5.0f, 0.0f);
 	push_constants.particle_capacity = particle_capacity;
+	push_constants.smoke_dir = smoke_dir;
+	push_constants.smoke_origin = smoke_origin;
+
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
@@ -927,7 +941,7 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 			GPUParticlePushConstants pc{};
 			pc.particle_size = particle_size;
 			pc.particle_color = particle_color;
-			vkCmdPushConstants(cmd, render_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+			vkCmdPushConstants(cmd, render_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
 
 			VkDeviceSize offset = sizeof(DrawIndirectCommand) * slice;
 			vkCmdDrawIndirect(cmd, indirect_draw_buffer.buffer, offset, 1, sizeof(DrawIndirectCommand));
@@ -1133,20 +1147,6 @@ void GPUSurfaceFlowSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat 
 		AssetCatalog::register_asset(particle_compact_pipeline);
 	}
 
-	{ // Update grid pipeline
-		ComputePipelineBuilder builder(ctx->device, true);
-		builder.set_shader_filepath("surface_flow.hlsl", "update_grid");
-		update_grid_pipeline = new ComputePipelineAsset(builder);
-		AssetCatalog::register_asset(update_grid_pipeline);
-	}
-
-	{ // Resolve collisions pipeline
-		ComputePipelineBuilder builder(ctx->device, true);
-		builder.set_shader_filepath("surface_flow.hlsl", "resolve_collisions");
-		resolve_collisions_pipeline = new ComputePipelineAsset(builder);
-		AssetCatalog::register_asset(resolve_collisions_pipeline);
-	}
-
 	{ // Particles buffer
 		for (int i = 0; i < 2; ++i)
 		{
@@ -1265,7 +1265,6 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 	push_constants.sdf_grid_spacing = sdf->grid_spacing;
 	push_constants.sdf_origin = sdf->grid_origin + glm::vec3(0.0f, 25.0f, 0.0f);
 	push_constants.particle_capacity = particle_capacity;
-	push_constants.max_particles_in_cell = max_particles_in_cell;
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
@@ -1339,27 +1338,6 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 			0, nullptr);
 	}
 
-#if 0
-	{ // Update grid
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, update_grid_pipeline->pipeline.pipeline);
-		vkCmdPushDescriptorSetWithTemplateKHR(cmd, update_grid_pipeline->pipeline.descriptor_update_template,
-			update_grid_pipeline->pipeline.layout, 0, descriptor_info);
-		vkCmdPushConstants(cmd, update_grid_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push_constants), &push_constants);
-		vkCmdDispatchIndirect(cmd, indirect_dispatch_buffer.buffer, 0);
-
-		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		vkCmdPipelineBarrier(cmd,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			0,
-			1, &memory_barrier,
-			0, nullptr,
-			0, nullptr);
-	}
-#endif
-
-#if 1
 	{ // Compact particles
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_compact_pipeline->pipeline.pipeline);
 		vkCmdPushDescriptorSetWithTemplateKHR(cmd, particle_compact_pipeline->pipeline.descriptor_update_template,
@@ -1376,24 +1354,6 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 			0, nullptr,
 			0, nullptr);
 	}
-#else
-	{ // Resolve collisions
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, resolve_collisions_pipeline->pipeline.pipeline);
-		vkCmdPushDescriptorSetWithTemplateKHR(cmd, resolve_collisions_pipeline->pipeline.descriptor_update_template,
-			resolve_collisions_pipeline->pipeline.layout, 0, descriptor_info);
-		vkCmdDispatchIndirect(cmd, indirect_dispatch_buffer.buffer, 0);
-
-		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		vkCmdPipelineBarrier(cmd,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			0,
-			1, &memory_barrier,
-			0, nullptr,
-			0, nullptr);
-	}
-#endif
 
 	{ // Write indirect draw counts
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particle_draw_count_pipeline->pipeline.pipeline);
@@ -1472,8 +1432,6 @@ void GPUSurfaceFlowSystem::destroy()
 	particle_draw_count_pipeline->builder.destroy_resources(particle_draw_count_pipeline->pipeline);
 	particle_simulate_pipeline->builder.destroy_resources(particle_simulate_pipeline->pipeline);
 	particle_compact_pipeline->builder.destroy_resources(particle_compact_pipeline->pipeline);
-	update_grid_pipeline->builder.destroy_resources(update_grid_pipeline->pipeline);
-	resolve_collisions_pipeline->builder.destroy_resources(resolve_collisions_pipeline->pipeline);
 	
 	ctx->destroy_buffer(indirect_dispatch_buffer);
 	ctx->destroy_buffer(indirect_draw_buffer);
@@ -1494,11 +1452,9 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 	{ // Render pipeline
 		ShaderSource fragment_source("trail_blazer.hlsl", "particle_fs");
-		fragment_source.add_defines("TEST_DEFINE");
 		GraphicsPipelineBuilder builder(ctx->device, true);
 		builder
 			.set_vertex_shader_filepath("trail_blazer.hlsl")
-			//.set_fragment_shader_filepath("trail_blazer.hlsl", "particle_fs")
 			.set_fragment_shader_source(fragment_source)
 			.set_cull_mode(VK_CULL_MODE_NONE)
 			.add_color_attachment(render_target_format)
@@ -1515,8 +1471,6 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 
 	// Pipelines
 	particle_emit_pipeline = create_pipeline(ctx, "trail_blazer.hlsl", "emit");
-	particle_dispatch_size_pipeline = create_pipeline(ctx, "trail_blazer.hlsl", "write_dispatch");
-	particle_draw_count_pipeline = create_pipeline(ctx, "trail_blazer.hlsl", "write_draw");
 	particle_simulate_pipeline = create_pipeline(ctx, "trail_blazer.hlsl", "simulate");
 
 	child_emit_pipeline = create_pipeline(ctx, "trail_blazer_child.hlsl", "emit");
@@ -1556,13 +1510,14 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 		BufferDesc desc{};
 		desc.size = sizeof(DispatchIndirectCommand);
 		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-		child_emit_indirect_dispatch_buffer = ctx->create_buffer(desc);
+		child_emit_indirect_dispatch_buffer = ctx->create_gpu_buffer(desc);
 	}
 
 	{ // indirect dispatch buffer
 		BufferDesc desc{};
 		desc.size = sizeof(DispatchIndirectCommand);
-		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | 
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 		indirect_dispatch_buffer = ctx->create_buffer(desc);
 		child_indirect_dispatch_buffer = ctx->create_buffer(desc);
 	}
@@ -1570,9 +1525,22 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 	{ //indirect draw buffer
 		BufferDesc desc{};
 		desc.size = sizeof(DrawIndirectCommand) * MAX_SLICES;
-		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | 
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 		indirect_draw_buffer = ctx->create_buffer(desc);
 		child_indirect_draw_buffer = ctx->create_buffer(desc);
+	}
+
+	{
+		VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+		info.magFilter = VK_FILTER_LINEAR;
+		info.minFilter = VK_FILTER_LINEAR;
+		info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		info.maxLod = VK_LOD_CLAMP_NONE;
+		info.maxAnisotropy = 1;
+		VK_CHECK(vkCreateSampler(ctx->device, &info, nullptr, &sdf_sampler));
 	}
 }
 
@@ -1612,69 +1580,21 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 			DescriptorInfo(particle_system_state[1].buffer),
 			DescriptorInfo(indirect_dispatch_buffer.buffer),
 			DescriptorInfo(indirect_draw_buffer.buffer),
-			DescriptorInfo(child_emit_indirect_dispatch_buffer.buffer),
+			DescriptorInfo(child_emit_indirect_dispatch_buffer),
+			DescriptorInfo(sdf->texture.view, sdf->texture.layout),
+			DescriptorInfo(sdf_sampler)
 		};
 
 		// Likewise for push constants
-		GPUParticlePushConstants push_constants{};
+		TrailBlazerPushConstants push_constants{};
 		push_constants.delta_time = dt;
 		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
-		push_constants.particle_size = particle_size * 0.1f;
-		push_constants.particle_color = particle_color;
-		push_constants.speed = particle_speed;
-		push_constants.time = time;
 		push_constants.particle_capacity = particle_capacity;
-		push_constants.children_to_emit = child_particles_to_spawn;
+		push_constants.sdf_dims = sdf->dims;
+		push_constants.sdf_origin = sdf->grid_origin;
+		push_constants.sdf_spacing = sdf->grid_spacing;
 
-		{ // Clear output state
-			vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
-			//vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
-			vkCmdFillBuffer(cmd, child_particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
-			vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
-;			//vkCmdFillBuffer(cmd, child_particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
-
-			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				VK_ACCESS_TRANSFER_WRITE_BIT,
-				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-		}
-
-		{ // Emit particles
-			dispatch(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
-			compute_barrier_simple(cmd);
-			//VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-			//	VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
-		}
-
-#if 0
-		{ // Write indirect dispatch size
-			dispatch(cmd, particle_dispatch_size_pipeline, &push_constants, sizeof(push_constants), descriptor_info, 1, 1, 1);
-			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-				VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
-		}
-#endif
-
-		{ // Simulate particles
-			VkHelpers::begin_label(cmd, "Simulate parent", glm::vec4(0.0f, 0.0f, 1.0f, 0.0f));
-			dispatch_indirect(cmd, particle_simulate_pipeline, &push_constants, sizeof(push_constants), descriptor_info, indirect_dispatch_buffer.buffer, 0);
-			compute_barrier_simple(cmd);
-			VkHelpers::end_label(cmd);
-		}
-
-#if 0
-		{ // Write indirect draw counts
-			VkHelpers::begin_label(cmd, "Write draw count", glm::vec4(0.0f, 0.0f, 1.0f, 0.0f));
-			GPUParticlePushConstants pc{};
-			pc.num_slices = 1;
-			dispatch(cmd, particle_draw_count_pipeline, &pc, sizeof(pc), descriptor_info, 1, 1, 1);
-			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-				VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
-			VkHelpers::end_label(cmd);
-		}
-#endif
-	}	
-
-	{ // Child particle system
-		DescriptorInfo descriptor_info[] = {
+		DescriptorInfo child_descriptor_info[] = {
 			DescriptorInfo(shader_globals),
 			DescriptorInfo(child_particle_buffer[0].buffer),
 			DescriptorInfo(child_particle_system_state[0].buffer),
@@ -1686,22 +1606,70 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 			DescriptorInfo(particle_buffer[0].buffer),
 		};
 
-		TrailBlazerChildPushConstants push_constants{};
+		TrailBlazerPushConstants child_push_constants{};
 
-		push_constants.delta_time = dt;
-		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
-		push_constants.particle_capacity = child_particle_capacity;
+		child_push_constants.delta_time = dt;
+		child_push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
+		child_push_constants.particle_capacity = child_particle_capacity;
 
-		//dispatch(cmd, child_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(spawn_count), 1, 1);
-		dispatch_indirect(cmd, child_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, child_emit_indirect_dispatch_buffer.buffer, 0);
-		compute_barrier_simple(cmd);
-		dispatch(cmd, child_dispatch_size_pipeline, nullptr, 0, descriptor_info, 1, 1, 1);
-		compute_barrier_simple(cmd);
-		dispatch_indirect(cmd, child_simulate_pipeline, &push_constants, sizeof(push_constants), descriptor_info, child_indirect_dispatch_buffer.buffer, 0);
-		compute_barrier_simple(cmd);
-		dispatch(cmd, child_draw_count_pipeline, nullptr, 0, descriptor_info, 1, 1, 1);
-		VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
-	}
+		{ // Clear output state
+			VkHelpers::begin_label(cmd, "Clear buffers", Colors::BEIGE);
+			vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, child_particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, child_indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+
+			{
+				DispatchIndirectCommand dispatch{};
+				dispatch.x = 0;
+				dispatch.y = (uint32_t)child_particles_to_spawn;
+				dispatch.z = 1;
+
+				void* mapped = nullptr;
+				ctx->map_buffer(child_emit_indirect_dispatch_buffer, &mapped);
+				memcpy(mapped, &dispatch, sizeof(dispatch));
+				ctx->unmap_buffer(child_emit_indirect_dispatch_buffer);
+				ctx->upload_buffer(child_emit_indirect_dispatch_buffer, cmd, offsetof(DispatchIndirectCommand, y));
+			}
+
+			{
+				VkBufferCopy copy{};
+				copy.dstOffset = 0;
+				copy.srcOffset = 0;
+				copy.size = sizeof(uint32_t);
+				vkCmdCopyBuffer(cmd, indirect_dispatch_buffer.buffer, child_emit_indirect_dispatch_buffer, 1, &copy);
+			}
+
+			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT,
+				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+
+			VkHelpers::end_label(cmd);
+		}
+
+		{ // Emit particles
+			VkHelpers::begin_label(cmd, "Emit", Colors::CYAN);
+			dispatch(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
+			VkHelpers::end_label(cmd);
+
+			VkHelpers::begin_label(cmd, "Emit child", Colors::CYAN);
+			dispatch_indirect(cmd, child_emit_pipeline, &child_push_constants, sizeof(child_push_constants), child_descriptor_info, child_emit_indirect_dispatch_buffer, 0);
+			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+				VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+			VkHelpers::end_label(cmd);
+		}
+
+		{ // Simulate particles
+			VkHelpers::begin_label(cmd, "Simulate parent", glm::vec4(0.0f, 0.0f, 1.0f, 0.0f));
+			dispatch_indirect(cmd, particle_simulate_pipeline, &push_constants, sizeof(push_constants), descriptor_info, indirect_dispatch_buffer.buffer, 0);
+			VkHelpers::end_label(cmd);
+
+			VkHelpers::begin_label(cmd, "Simulate child", Colors::LIME);
+			dispatch_indirect(cmd, child_simulate_pipeline, &child_push_constants, sizeof(child_push_constants), child_descriptor_info, child_indirect_dispatch_buffer.buffer, 0);
+			compute_barrier_simple(cmd);
+			VkHelpers::end_label(cmd);
+		}
+	}	
 
 	particles_to_spawn -= std::floor(particles_to_spawn);
 	child_particles_to_spawn -= std::floor(child_particles_to_spawn);
@@ -1766,8 +1734,6 @@ void TrailBlazerSystem::destroy()
 {
 	render_pipeline->builder.destroy_resources(render_pipeline->pipeline);
 	particle_emit_pipeline->builder.destroy_resources(particle_emit_pipeline->pipeline);
-	particle_dispatch_size_pipeline->builder.destroy_resources(particle_dispatch_size_pipeline->pipeline);
-	particle_draw_count_pipeline->builder.destroy_resources(particle_draw_count_pipeline->pipeline);
 	particle_simulate_pipeline->builder.destroy_resources(particle_simulate_pipeline->pipeline);
 
 	child_emit_pipeline->builder.destroy_resources(child_emit_pipeline->pipeline);
@@ -1775,6 +1741,7 @@ void TrailBlazerSystem::destroy()
 	child_draw_count_pipeline->builder.destroy_resources(child_draw_count_pipeline->pipeline);
 	child_simulate_pipeline->builder.destroy_resources(child_simulate_pipeline->pipeline);
 
+	vkDestroySampler(ctx->device, sdf_sampler, nullptr);
 	ctx->destroy_buffer(indirect_dispatch_buffer);
 	ctx->destroy_buffer(indirect_draw_buffer);
 	ctx->destroy_buffer(child_indirect_dispatch_buffer);
@@ -1804,4 +1771,412 @@ void TrailBlazerSystem::draw_config_ui()
 const char* TrailBlazerSystem::get_display_name()
 {
 	return "Trail Blazer";
+}
+
+void ParticleSystemSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, const Config& cfg)
+{
+	this->ctx = ctx;
+	shader_globals = globals_buffer;
+	config = cfg;
+	emit_indirect_dispatch_handled_externally = cfg.emit_indirect_dispatch_handled_externally;
+
+	constexpr uint32_t default_descriptor_count = 7;
+	descriptors.resize(default_descriptor_count + cfg.additional_descriptors.size());
+	for (uint32_t i = 0; i < cfg.additional_descriptors.size(); ++i)
+	{
+		descriptors[default_descriptor_count + i] = cfg.additional_descriptors[i];
+	}
+
+	{ // Render pipeline
+		ShaderSource vertex_source("particle_render.hlsl", "vs_main");
+		ShaderSource fragment_source("particle_render.hlsl", "fs_main");
+		fragment_source.add_include(cfg.emit_and_simulate_file, true);
+		GraphicsPipelineBuilder builder(ctx->device, true);
+		builder
+			.set_vertex_shader_source(vertex_source)
+			.set_fragment_shader_source(fragment_source)
+			.set_cull_mode(VK_CULL_MODE_NONE)
+			.add_color_attachment(render_target_format)
+			//.set_blend_preset(BlendPreset::ADDITIVE)
+			.set_blend_state(
+				VkPipelineColorBlendAttachmentState{
+					VK_TRUE,
+					VK_BLEND_FACTOR_ONE,
+					VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+					VK_BLEND_OP_ADD,
+					VK_BLEND_FACTOR_ONE,
+					VK_BLEND_FACTOR_ZERO,
+					VK_BLEND_OP_ADD,
+					VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+				}
+			)
+			.set_depth_format(VK_FORMAT_D32_SFLOAT)
+			.set_depth_test(VK_TRUE)
+			.set_depth_write(VK_FALSE)
+			.set_depth_compare_op(VK_COMPARE_OP_LESS)
+			.set_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST);
+
+		render_pipeline = new GraphicsPipelineAsset(builder);
+		AssetCatalog::register_asset(render_pipeline);
+	}
+
+	// Pipelines
+	ShaderSource emit_source("particle_template.hlsl", "emit");
+	emit_source.add_include(cfg.emit_and_simulate_file, true);
+	particle_emit_pipeline = create_pipeline(ctx, emit_source);
+
+	ShaderSource simulate_source("particle_template.hlsl", "simulate");
+	simulate_source.add_include(cfg.emit_and_simulate_file, true);
+	particle_simulate_pipeline = create_pipeline(ctx, simulate_source);
+
+	{ // Particles buffer
+		for (int i = 0; i < 2; ++i)
+		{
+			size_t particle_buffer_size = cfg.particle_capacity * sizeof(GPUParticle);
+			BufferDesc desc{};
+			desc.size = particle_buffer_size;
+			desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+			particle_buffer[i] = ctx->create_buffer(desc);
+		}
+	}
+
+	{ // Particle system state buffer
+		for (int i = 0; i < 2; ++i)
+		{
+			BufferDesc desc{};
+			desc.size = sizeof(GPUParticleSystemState);
+			desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+				VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+			particle_system_state[i] = ctx->create_buffer(desc);
+		}
+	}
+
+	{ // indirect dispatch buffer
+		BufferDesc desc{};
+		desc.size = sizeof(DispatchIndirectCommand);
+		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		indirect_dispatch_buffer = ctx->create_buffer(desc);
+		emit_indirect_dispatch_buffer = ctx->create_gpu_buffer(desc);
+	}
+
+	{ // indirect draw buffer
+		BufferDesc desc{};
+		desc.size = sizeof(DrawIndirectCommand) * MAX_SLICES;
+		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		indirect_draw_buffer = ctx->create_buffer(desc);
+	}
+}
+
+void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt)
+{
+	dt = glm::clamp(dt, 0.0f, MAX_DELTA_TIME);
+	particles_to_spawn += config.spawn_rate * dt;
+	time += dt;
+
+	if (!particles_initialized)
+	{ // Zero init buffers
+		for (int i = 0; i < 2; ++i)
+		{
+			vkCmdFillBuffer(cmd, particle_buffer[i].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, particle_system_state[i].buffer, 0, VK_WHOLE_SIZE, 0);
+		}
+
+		{
+			// Initialize y and z so that shaders only have to worry about writing x
+			DispatchIndirectCommand dispatch{};
+			dispatch.x = 0;
+			dispatch.y = 1;
+			dispatch.z = 1;
+
+			void* mapped = nullptr;
+			ctx->map_buffer(emit_indirect_dispatch_buffer, &mapped);
+			memcpy(mapped, &dispatch, sizeof(dispatch));
+			ctx->unmap_buffer(emit_indirect_dispatch_buffer);
+			ctx->upload_buffer(emit_indirect_dispatch_buffer, cmd);
+		}
+
+		VkHelpers::memory_barrier(cmd,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+
+		particles_initialized = true;
+	}
+
+	{
+		// set descriptors
+
+		// All passes use the same descriptors for now
+		DescriptorInfo descriptor_info[] = {
+			DescriptorInfo(shader_globals),
+			DescriptorInfo(particle_buffer[0].buffer),
+			DescriptorInfo(particle_system_state[0].buffer),
+			DescriptorInfo(particle_buffer[1].buffer),
+			DescriptorInfo(particle_system_state[1].buffer),
+			DescriptorInfo(indirect_dispatch_buffer.buffer),
+			DescriptorInfo(indirect_draw_buffer.buffer),
+		};
+
+		memcpy(descriptors.data(), descriptor_info, sizeof(descriptor_info));
+	}
+
+	{
+
+		// Likewise for push constants
+		ParticleTemplatePushConstants push_constants{};
+		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
+		push_constants.particle_capacity = config.particle_capacity;
+		push_constants.delta_time = dt;
+
+		{ // Clear output state
+			VkHelpers::begin_label(cmd, "Clear buffers", Colors::BEIGE);
+			vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+
+			if (!emit_indirect_dispatch_handled_externally)
+			{
+				// Write it ourselves
+				DispatchIndirectCommand dispatch{};
+
+				dispatch.x = get_dispatch_size(push_constants.particles_to_spawn);
+				dispatch.y = 1;
+				dispatch.z = 1;
+
+				void* mapped;
+				ctx->map_buffer(emit_indirect_dispatch_buffer, &mapped);
+				memcpy(mapped, &dispatch, sizeof(dispatch));
+				ctx->unmap_buffer(emit_indirect_dispatch_buffer);
+				ctx->upload_buffer(emit_indirect_dispatch_buffer, cmd);
+			}
+			VkHelpers::end_label(cmd);
+		}
+	}
+}
+
+void ParticleSystemSimple::emit(VkCommandBuffer cmd, float dt)
+{
+	// Likewise for push constants
+	ParticleTemplatePushConstants push_constants{};
+	push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
+	push_constants.particle_capacity = config.particle_capacity;
+	push_constants.delta_time = dt;
+
+	VkHelpers::begin_label(cmd, "Emit", Colors::CYAN);
+	//dispatch(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
+	dispatch_indirect(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptors.data(), emit_indirect_dispatch_buffer, 0);
+	//VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+	//	VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+	VkHelpers::end_label(cmd);
+}
+
+void ParticleSystemSimple::update(VkCommandBuffer cmd, float dt)
+{
+	// Likewise for push constants
+	ParticleTemplatePushConstants push_constants{};
+	push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
+	push_constants.particle_capacity = config.particle_capacity;
+	push_constants.delta_time = dt;
+
+	VkHelpers::begin_label(cmd, "Simulate", glm::vec4(0.0f, 0.0f, 1.0f, 0.0f));
+	dispatch_indirect(cmd, particle_simulate_pipeline, &push_constants, sizeof(push_constants), descriptors.data(), indirect_dispatch_buffer.buffer, 0);
+	VkHelpers::end_label(cmd);
+}
+
+void ParticleSystemSimple::post_update(VkCommandBuffer cmd, float dt)
+{
+	particles_to_spawn -= std::floor(particles_to_spawn);
+
+	// Swap buffers
+	std::swap(particle_system_state[0], particle_system_state[1]);
+	std::swap(particle_buffer[0], particle_buffer[1]);
+}
+
+void ParticleSystemSimple::simulate(VkCommandBuffer cmd, float dt)
+{
+	VkHelpers::begin_label(cmd, "Particle template simulate", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+
+	dt = glm::clamp(dt, 0.0f, MAX_DELTA_TIME);
+	particles_to_spawn += config.spawn_rate * dt;
+	time += dt;
+
+	if (!particles_initialized)
+	{ // Zero init buffers
+		for (int i = 0; i < 2; ++i)
+		{
+			vkCmdFillBuffer(cmd, particle_buffer[i].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, particle_system_state[i].buffer, 0, VK_WHOLE_SIZE, 0);
+		}
+
+		particles_initialized = true;
+	}
+
+	{ 
+		// All passes use the same descriptors for now
+		DescriptorInfo descriptor_info[] = {
+			DescriptorInfo(shader_globals),
+			DescriptorInfo(particle_buffer[0].buffer),
+			DescriptorInfo(particle_system_state[0].buffer),
+			DescriptorInfo(particle_buffer[1].buffer),
+			DescriptorInfo(particle_system_state[1].buffer),
+			DescriptorInfo(indirect_dispatch_buffer.buffer),
+			DescriptorInfo(indirect_draw_buffer.buffer),
+		};
+
+		// Likewise for push constants
+		ParticleTemplatePushConstants push_constants{};
+		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
+		push_constants.particle_capacity = config.particle_capacity;
+		push_constants.delta_time = dt;
+
+		{ // Clear output state
+			VkHelpers::begin_label(cmd, "Clear buffers", Colors::BEIGE);
+			vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+
+			{
+				DispatchIndirectCommand dispatch{};
+
+				dispatch.x = get_dispatch_size(push_constants.particles_to_spawn);
+				dispatch.y = 1;
+				dispatch.z = 1;
+
+				void* mapped;
+				ctx->map_buffer(emit_indirect_dispatch_buffer, &mapped);
+				memcpy(mapped, &dispatch, sizeof(dispatch));
+				ctx->unmap_buffer(emit_indirect_dispatch_buffer);
+				ctx->upload_buffer(emit_indirect_dispatch_buffer, cmd);
+			}
+
+			VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+				VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT,
+				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+
+			VkHelpers::end_label(cmd);
+		}
+
+		{ // Emit particles
+			VkHelpers::begin_label(cmd, "Emit", Colors::CYAN);
+			//dispatch(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
+			dispatch_indirect(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, emit_indirect_dispatch_buffer, 0);
+			compute_barrier_simple(cmd);
+			//VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+			//	VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+			VkHelpers::end_label(cmd);
+		}
+
+		{ // Simulate particles
+			VkHelpers::begin_label(cmd, "Simulate", glm::vec4(0.0f, 0.0f, 1.0f, 0.0f));
+			dispatch_indirect(cmd, particle_simulate_pipeline, &push_constants, sizeof(push_constants), descriptor_info, indirect_dispatch_buffer.buffer, 0);
+			compute_barrier_simple(cmd);
+			VkHelpers::end_label(cmd);
+		}
+	}
+
+	particles_to_spawn -= std::floor(particles_to_spawn);
+
+	// Swap buffers
+	std::swap(particle_system_state[0], particle_system_state[1]);
+	std::swap(particle_buffer[0], particle_buffer[1]);
+
+	VkHelpers::end_label(cmd);
+}
+
+void ParticleSystemSimple::render(VkCommandBuffer cmd)
+{
+	VkHelpers::begin_label(cmd, "Particle template render", glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
+
+	DescriptorInfo descriptor_info[] = {
+		DescriptorInfo(shader_globals),
+		DescriptorInfo(particle_buffer[0].buffer),
+	};
+
+	vkCmdPushDescriptorSetWithTemplateKHR(cmd, render_pipeline->pipeline.descriptor_update_template, render_pipeline->pipeline.layout, 0, descriptor_info);
+	vkCmdDrawIndirect(cmd, indirect_draw_buffer.buffer, 0, 1, sizeof(DrawIndirectCommand));
+
+	VkHelpers::end_label(cmd);
+}
+
+void ParticleSystemSimple::destroy()
+{
+	render_pipeline->builder.destroy_resources(render_pipeline->pipeline);
+	particle_emit_pipeline->builder.destroy_resources(particle_emit_pipeline->pipeline);
+	particle_simulate_pipeline->builder.destroy_resources(particle_simulate_pipeline->pipeline);
+
+	ctx->destroy_buffer(indirect_dispatch_buffer);
+	ctx->destroy_buffer(indirect_draw_buffer);
+	ctx->destroy_buffer(emit_indirect_dispatch_buffer);
+	for (int i = 0; i < 2; ++i)
+	{
+		ctx->destroy_buffer(particle_buffer[i]);
+		ctx->destroy_buffer(particle_system_state[i]);
+	}
+}
+
+void ParticleSystemSimple::draw_config_ui()
+{
+	if (ImGui::InputFloat("emission rate", &config.spawn_rate, 1.0f, 100.0f))
+	{
+		config.spawn_rate = std::clamp(config.spawn_rate, 0.0f, 10000000.0f);
+	}
+}
+
+const char* ParticleSystemSimple::get_display_name()
+{
+	return config.name.c_str();
+}
+
+void ParticleManagerSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format)
+{
+	this->ctx = ctx;
+	this->globals_buffer = globals_buffer;
+	this->render_target_format = render_target_format;
+}
+
+ParticleSystemSimple* ParticleManagerSimple::add_system(const ParticleSystemSimple::Config& cfg)
+{
+	ParticleSystemSimple* system = new ParticleSystemSimple();
+	system->init(ctx, globals_buffer, render_target_format, cfg);
+	systems.push_back(system);
+
+	return system;
+}
+
+void ParticleManagerSimple::update_systems(VkCommandBuffer cmd, float dt)
+{
+	VkHelpers::begin_label(cmd, "Particle Manager pre update", Colors::APRICOT);
+	for (ParticleSystemSimple* system : systems) system->pre_update(cmd, dt);
+
+	VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+		VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT,
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+	VkHelpers::end_label(cmd);
+
+	VkHelpers::begin_label(cmd, "Particle Manager emit", Colors::CYAN);
+	for (ParticleSystemSimple* system : systems) system->emit(cmd, dt);
+
+	VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+		VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+	VkHelpers::end_label(cmd);
+
+	VkHelpers::begin_label(cmd, "Particle Manager update", Colors::LIME);
+	for (ParticleSystemSimple* system : systems) system->update(cmd, dt);
+
+	compute_barrier_simple(cmd);
+	VkHelpers::end_label(cmd);
+
+	for (ParticleSystemSimple* system : systems) system->post_update(cmd, dt);
+}
+
+void ParticleManagerSimple::render_systems(VkCommandBuffer cmd)
+{
+	VkHelpers::begin_label(cmd, "Particle Manager render", Colors::BEIGE);
+	for (ParticleSystemSimple* system : systems) system->render(cmd);
+	VkHelpers::end_label(cmd);
+}
+
+void ParticleManagerSimple::destroy()
+{
+	for (ParticleSystemSimple* system : systems) system->destroy();
 }

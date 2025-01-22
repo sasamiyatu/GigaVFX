@@ -48,6 +48,16 @@ struct PushConstantsForward
     int material_index;
 };
 
+struct DepthPrepassPushConstants
+{
+    float4x4 model;
+    uint64_t position_buffer;
+    uint64_t texcoord0_buffer;
+    int noise_texture_index;
+    float alpha_reference;
+    float prev_alpha_reference;
+};
+
 struct PushCostantsParticles
 {
     float4 position;
@@ -83,6 +93,7 @@ struct ShaderGlobals
     float4 sun_color_and_intensity;
     float2 resolution;
     uint frame_index;
+    float time;
 };
 
 struct ParticleRenderSettings
@@ -96,7 +107,6 @@ struct GPUParticlePushConstants
     float4 particle_color;
     float3 sort_axis;
     float delta_time;
-    uint64_t blas_address;
     uint particles_to_spawn;
     float particle_size;
     uint num_slices;
@@ -110,8 +120,9 @@ struct GPUParticlePushConstants
     float sdf_grid_spacing;
     uint3 sdf_grid_dims;
     uint particle_capacity;
-    uint max_particles_in_cell;
     uint children_to_emit;
+    float3 smoke_dir;
+    float3 smoke_origin;
 };
 
 struct GPUParticleSystemGlobals
@@ -164,9 +175,7 @@ struct AccelerationStructureInstance
 
 struct GPUParticleSystemState
 {
-    uint active_particle_count; // Also dispatch x
-    uint dispatch_y;
-    uint dispatch_z;
+    uint active_particle_count;
 };
 
 struct GPUParticle
@@ -176,6 +185,7 @@ struct GPUParticle
     float3 velocity;
     float lifetime; // alive if > 0
     float4 color;
+    float max_lifetime;
 };
 
 struct GPUParticleSort
@@ -191,7 +201,17 @@ struct SDFPushConstants
     float3 grid_origin;
 };
 
-struct TrailBlazerChildPushConstants
+struct TrailBlazerPushConstants
+{
+    uint particles_to_spawn;
+    uint particle_capacity;
+    float delta_time;
+    uint3 sdf_dims;
+    float sdf_spacing;
+    float3 sdf_origin;
+};
+
+struct ParticleTemplatePushConstants
 {
     uint particles_to_spawn;
     uint particle_capacity;

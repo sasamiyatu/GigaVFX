@@ -117,6 +117,7 @@ void Context::init(int window_width, int window_height)
     features.shaderInt64 = VK_TRUE;
     features.samplerAnisotropy = VK_TRUE;
     features.vertexPipelineStoresAndAtomics = VK_TRUE;
+	features.fragmentStoresAndAtomics = VK_TRUE;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration_structure_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
     acceleration_structure_features.accelerationStructure = VK_TRUE;
@@ -868,14 +869,14 @@ void Context::unmap_buffer(const GPUBuffer& buffer)
     vmaUnmapMemory(allocator, buffer.staging_buffers[frame_index].allocation);
 }
 
-void Context::upload_buffer(const GPUBuffer& buffer, VkCommandBuffer cmd)
+void Context::upload_buffer(const GPUBuffer& buffer, VkCommandBuffer cmd, uint32_t offset, uint32_t size)
 {
     assert(buffer.gpu_buffer.size == buffer.staging_buffers[frame_index].size);
 
     VkBufferCopy copy{};
-    copy.dstOffset = 0;
-    copy.srcOffset = 0;
-    copy.size = buffer.gpu_buffer.size;
+    copy.dstOffset = offset;
+    copy.srcOffset = offset;
+    copy.size = size != 0 ? size : buffer.gpu_buffer.size - offset;
 
     vkCmdCopyBuffer(cmd, buffer.staging_buffers[frame_index].buffer, buffer.gpu_buffer.buffer, 1, &copy);
 }

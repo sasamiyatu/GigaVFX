@@ -32,7 +32,7 @@
 #include "gpu_particles.h"
 #include "radix_sort.h"
 #include "camera.h"
-#include "vk_helpers.h"
+#include "timer.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
@@ -46,6 +46,8 @@ constexpr uint32_t DEPTH_TEXTURE_SIZE = 2048;
 
 Context ctx;
 
+static std::atomic<bool> needs_hot_reload = false;
+static std::atomic<bool> hot_reload_watcher_should_quit = false;
 
 template <typename F>
 void traverse_tree(const cgltf_node* node, F&& f)
@@ -100,6 +102,7 @@ struct MeshInstance
 {
     glm::mat4 transform;
     uint32_t mesh_index;
+    uint32_t variant_index; 
 };
 
 namespace Input
@@ -161,7 +164,7 @@ int main(int argc, char** argv)
     }
 
     SDF sdf{};
-    if (!sdf_load_from_file(sdf, "data/dragon.sdf"))
+    if (!sdf_load_from_file(sdf, "data/dragon_small.sdf"))
     {
         LOG_ERROR("Failed to load SDF!");
         exit(EXIT_FAILURE);
@@ -205,6 +208,16 @@ int main(int argc, char** argv)
         info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
         VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &bilinear_sampler));
     }
+	VkSampler point_sampler = VK_NULL_HANDLE;
+	{
+		VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+		info.magFilter = VK_FILTER_NEAREST;
+		info.minFilter = VK_FILTER_NEAREST;
+		info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &point_sampler));
+	}
     VkSampler shadow_sampler = VK_NULL_HANDLE;
     {
         VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
@@ -218,16 +231,6 @@ int main(int argc, char** argv)
         info.maxAnisotropy = ctx.physical_device.properties.limits.maxSamplerAnisotropy;
         VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &shadow_sampler));
     }
-    VkSampler point_sampler = VK_NULL_HANDLE;
-    {
-        VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-        info.magFilter = VK_FILTER_NEAREST;
-        info.minFilter = VK_FILTER_NEAREST;
-        info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        VK_CHECK(vkCreateSampler(ctx.device, &info, nullptr, &point_sampler));
-    }
 
     Texture depth_texture{};
     ctx.create_texture(depth_texture, WINDOW_WIDTH, WINDOW_HEIGHT, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
@@ -237,7 +240,30 @@ int main(int argc, char** argv)
 
     Texture hdr_render_target{};
     ctx.create_texture(hdr_render_target, WINDOW_WIDTH, WINDOW_HEIGHT, 1, RENDER_TARGET_FORMAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+    
+    { 
+        VkCommandBuffer cmd = ctx.allocate_and_begin_command_buffer();
 
+        // Transition depth buffer layout
+        // Nvidia hardware has no concept of image layouts, and that's what I'm using, so using VK_IMAGE_LAYOUT_GENERAL for now...
+        VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
+            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            0,
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_GENERAL,
+            depth_texture.image,
+            VK_IMAGE_ASPECT_DEPTH_BIT
+        );
+
+        VkDependencyInfo dep_info{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        dep_info.imageMemoryBarrierCount = 1;
+        dep_info.pImageMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(cmd, &dep_info);
+
+        ctx.end_command_buffer_submit_and_free(cmd);
+    }
 
     GraphicsPipelineAsset* depth_prepass = nullptr;
     { // Depth prepass pipeline
@@ -248,11 +274,33 @@ int main(int argc, char** argv)
             .set_depth_format(VK_FORMAT_D32_SFLOAT)
             .set_depth_test(VK_TRUE)
             .set_depth_write(VK_TRUE)
-            .set_depth_compare_op(VK_COMPARE_OP_LESS);
+            .set_depth_compare_op(VK_COMPARE_OP_LESS)
+            .set_descriptor_set_layout(1, ctx.bindless_descriptor_set_layout);
 
         depth_prepass = new GraphicsPipelineAsset(pipeline_builder);
         AssetCatalog::register_asset(depth_prepass);
     }
+
+    // Variant with discard based on noise
+	GraphicsPipelineAsset* depth_prepass_disintegrate;
+	{
+		GraphicsPipelineBuilder pipeline_builder(ctx.device, true);
+        ShaderSource vertex_source("depth_prepass.hlsl", "vs_main");
+        vertex_source.add_specialization_constant(1, true);
+        ShaderSource fragment_source("depth_prepass.hlsl", "fs_main");
+        fragment_source.add_specialization_constant(1, true);
+		pipeline_builder
+            .set_vertex_shader_source(vertex_source)
+			.set_fragment_shader_source(fragment_source)
+			.set_cull_mode(VK_CULL_MODE_NONE)
+			.set_depth_format(VK_FORMAT_D32_SFLOAT)
+			.set_depth_test(VK_TRUE)
+			.set_depth_write(VK_TRUE)
+			.set_depth_compare_op(VK_COMPARE_OP_LESS)
+            .set_descriptor_set_layout(1, ctx.bindless_descriptor_set_layout);
+		depth_prepass_disintegrate = new GraphicsPipelineAsset(pipeline_builder);
+		AssetCatalog::register_asset(depth_prepass_disintegrate);
+	}
 
     GraphicsPipelineBuilder pipeline_builder(ctx.device, true);
     pipeline_builder
@@ -373,8 +421,56 @@ int main(int argc, char** argv)
     config_uis.push_back(&flow2);
 
     TrailBlazerSystem trail_blazer;
+    trail_blazer.sdf = &sdf;
     trail_blazer.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT);
     config_uis.push_back(&trail_blazer);
+
+	ParticleManagerSimple particle_manager;
+    particle_manager.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT);
+    
+    {
+        ParticleSystemSimple::Config config{};
+        config.emit_and_simulate_file = "particle_simple.hlsli";
+        config.particle_capacity = 32678;
+        config.spawn_rate = 1000.0f;
+        config.name = "Particle Simple";
+        particle_manager.add_system(config);
+    }
+
+    {
+        ParticleSystemSimple::Config config{};
+        config.emit_and_simulate_file = "particle_simple2.hlsli";
+        config.particle_capacity = 32678;
+        config.spawn_rate = 1000.0f;
+        config.name = "Particle Simple2";
+		particle_manager.add_system(config);
+    }
+
+    Buffer mesh_disintegrate_spawn_positions;
+
+    {
+        BufferDesc desc{};
+        desc.size = sizeof(glm::vec2) * WINDOW_WIDTH * WINDOW_HEIGHT;
+        desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        mesh_disintegrate_spawn_positions = ctx.create_buffer(desc);
+    }
+
+	ParticleSystemSimple* disintegrator_system = nullptr;
+    {
+        ParticleSystemSimple::Config config{};
+        config.emit_and_simulate_file = "mesh_disintegrate.hlsli";
+        config.particle_capacity = 32678;
+        config.name = "MeshDisintegrate";
+        config.emit_indirect_dispatch_handled_externally = true;
+        config.additional_descriptors = {
+            DescriptorInfo(mesh_disintegrate_spawn_positions.buffer),
+            DescriptorInfo(depth_texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+            DescriptorInfo(point_sampler)
+        };
+        disintegrator_system = particle_manager.add_system(config);
+    }
+
+	for (auto& s : particle_manager.systems) config_uis.push_back(s);
 
     std::vector<MeshInstance> mesh_draws;
 
@@ -393,13 +489,55 @@ int main(int argc, char** argv)
         AssetCatalog::register_asset(sdf_test);
     }
 
+    // Separate thread for checking need for hot reload
+    std::thread hot_reload_watcher([]() {
+        while (!hot_reload_watcher_should_quit)
+        {
+            if (!needs_hot_reload)
+            {
+                needs_hot_reload = AssetCatalog::check_for_dirty_assets();
+            }
+
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
     glm::vec3 sundir = glm::normalize(glm::vec3(1.0f));
     bool running = true;
     bool texture_catalog_open = true;
     uint32_t frame_index = 0;
     bool show_imgui_demo = false;
+    double cpu_time_ms = 0.0;
+
+    glm::vec3 smoke_dir = glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 smoke_origin = glm::vec3(0.0f);
+    {
+        auto print_hierarchy = [&](const cgltf_node* node)
+            {
+                if (strcmp(node->name, "smoke_origin") == 0)
+                {
+                    printf("%s\n", node->name);
+                    glm::mat4 transform;
+                    cgltf_node_transform_world(node, glm::value_ptr(transform));
+                    smoke_dir = glm::normalize(glm::vec3(transform[2]));
+                    smoke_origin = glm::vec3(transform[3]);
+                }
+            };
+
+        const cgltf_scene* scene = gltf_data->scene;
+        for (size_t i = 0; i < scene->nodes_count; ++i)
+        {
+            traverse_tree(scene->nodes[i], print_hierarchy);
+        }
+    }
+
+    smoke_system.smoke_origin = smoke_origin;
+    smoke_system.smoke_dir = smoke_dir;
+
     while (running)
     {
+        Timer timer;
+        timer.tick();
         VkCommandBuffer command_buffer = ctx.begin_frame();
         Texture& swapchain_texture = ctx.get_swapchain_texture();
 
@@ -411,7 +549,8 @@ int main(int argc, char** argv)
 
         { // Frame stats
             ImGui::Begin("GPU Particle System");
-            ImGui::Text("Frame time: %f ms", ctx.smoothed_frame_time_ns * 1e-6f);
+            ImGui::Text("GPU frame time: %f ms", ctx.smoothed_frame_time_ns * 1e-6f);
+            ImGui::Text("CPU frame time: %f ms", cpu_time_ms);
             ImGui::Text("Particle simulate: %f us", smoke_system.performance_timings.simulate_total * 1e-3f);
             ImGui::Text("Particle render: %f us", smoke_system.performance_timings.render_total * 1e-3f);
             ImGui::Separator();
@@ -533,23 +672,20 @@ int main(int argc, char** argv)
 
         uint64_t tick = SDL_GetPerformanceCounter();
         double delta_time = (tick - current_tick) * inv_pfreq;
+        double elapsed_time = (tick - start_tick) * inv_pfreq;
         current_tick = tick;
 
         particle_system_manager.update((float)delta_time);
 
-        static float hot_reload_timer = 0.0f;
-        hot_reload_timer += delta_time;
-        if (hot_reload_timer > 1.0f)
+        if (needs_hot_reload)
         {
-            if (AssetCatalog::check_for_dirty_assets())
+            VK_CHECK(vkDeviceWaitIdle(ctx.device));
+            while (!AssetCatalog::reload_dirty_assets())
             {
-                VK_CHECK(vkDeviceWaitIdle(ctx.device));
-                while (!AssetCatalog::reload_dirty_assets())
-                {
-                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Shader compilation error", "Shader compilation failed!\nRetry?", ctx.window);
-                }
+                SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Shader compilation error", "Shader compilation failed!\nRetry?", ctx.window);
             }
-            hot_reload_timer -= 1.0f;
+
+            needs_hot_reload = false;
         }
 
         camera.position += glm::vec3(rotation * glm::vec4(movement, 0.0f)) * (float)delta_time * movement_speed;
@@ -562,6 +698,14 @@ int main(int argc, char** argv)
                     {
                         MeshInstance& mi = mesh_draws.emplace_back();
                         mi.mesh_index = (uint32_t)cgltf_mesh_index(gltf_data, node->mesh);
+						if (node->name && strcmp(node->name, "dragon_mat") == 0)
+						{
+							mi.variant_index = 1;
+						}
+                        else
+                        {
+                            mi.variant_index = 0;
+                        }
                         cgltf_node_transform_world(node, glm::value_ptr(mi.transform));
                     }
                 };
@@ -571,6 +715,8 @@ int main(int argc, char** argv)
             {
                 traverse_tree(scene->nodes[i], get_meshes);
             }
+
+			std::sort(mesh_draws.begin(), mesh_draws.end(), [](const MeshInstance& a, const MeshInstance& b) { return a.variant_index < b.variant_index; });
         }
 
         glm::mat4 shadow_projs[4];
@@ -588,6 +734,7 @@ int main(int argc, char** argv)
             globals.sun_color_and_intensity = glm::vec4(1.0f);
             globals.resolution = glm::vec2((float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
             globals.frame_index = frame_index;
+            globals.time = (float)elapsed_time;
 
             glm::vec4 origin_shift[4];
             float max_distance = 100.0f;
@@ -631,14 +778,12 @@ int main(int argc, char** argv)
 
             void* mapped;
             ctx.map_buffer(globals_buffer, &mapped);
-            //vmaMapMemory(ctx.allocator, globals_buffer.allocation, &mapped);
             memcpy(mapped, &globals, sizeof(globals));
             ctx.unmap_buffer(globals_buffer);
             ctx.upload_buffer(globals_buffer, command_buffer);
             VkHelpers::memory_barrier(command_buffer,
                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                 VK_ACCESS_TRANSFER_WRITE_BIT, 0);
-            //vmaUnmapMemory(ctx.allocator, globals_buffer.allocation);
         }
 
         VkHelpers::end_label(command_buffer);
@@ -648,22 +793,14 @@ int main(int argc, char** argv)
         flow2.simulate(command_buffer, (float)delta_time);
         trail_blazer.simulate(command_buffer, (float)delta_time);
 
-        { // Transition depth buffer layout
-            VkImageMemoryBarrier2 barrier = VkHelpers::image_memory_barrier2(
-                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                0,
-                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                depth_texture.image,
-                VK_IMAGE_ASPECT_DEPTH_BIT
-            );
+		particle_manager.update_systems(command_buffer, (float)delta_time);
 
-            VkDependencyInfo dep_info{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-            dep_info.imageMemoryBarrierCount = 1;
-            dep_info.pImageMemoryBarriers = &barrier;
-            vkCmdPipelineBarrier2(command_buffer, &dep_info);
+        {
+            // Clear dispatch count because depth prepass will write it
+            vkCmdFillBuffer(command_buffer, disintegrator_system->emit_indirect_dispatch_buffer, 0, sizeof(uint32_t), 0);
+			VkHelpers::memory_barrier(command_buffer,
+				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+				VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
         }
 
         { // Transition render target
@@ -810,9 +947,12 @@ int main(int argc, char** argv)
             vkCmdSetViewport(command_buffer, 0, 1, &viewport);
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_prepass->pipeline.pipeline);
-
+			vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_prepass->pipeline.layout, 1, 1, &ctx.bindless_descriptor_set, 0, nullptr);
             DescriptorInfo descriptor_info[] = {
                 DescriptorInfo(globals_buffer),
+                DescriptorInfo(bilinear_sampler),
+                DescriptorInfo(disintegrator_system->emit_indirect_dispatch_buffer),
+				DescriptorInfo(mesh_disintegrate_spawn_positions.buffer),
             };
 
             vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, depth_prepass->pipeline.descriptor_update_template, 
@@ -821,22 +961,26 @@ int main(int argc, char** argv)
             for (const auto& mi : mesh_draws)
             {
                 const Mesh& mesh = meshes[mi.mesh_index];
+                
+                if (mi.variant_index == 1) vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_prepass_disintegrate->pipeline.pipeline);
 
-                PushConstantsForward pc{};
+                DepthPrepassPushConstants pc{};
                 static_assert(sizeof(pc) <= 128);
 
                 pc.model = mi.transform;
                 pc.position_buffer = ctx.buffer_device_address(mesh.position);
-                if (mesh.normal) pc.normal_buffer = ctx.buffer_device_address(mesh.normal);
-                if (mesh.tangent) pc.tangent_buffer = ctx.buffer_device_address(mesh.tangent);
+                pc.alpha_reference = glm::fract(elapsed_time * 0.1f);
+				pc.prev_alpha_reference = glm::fract((elapsed_time - delta_time) * 0.1f);
                 if (mesh.texcoord0) pc.texcoord0_buffer = ctx.buffer_device_address(mesh.texcoord0);
-                if (mesh.texcoord1) pc.texcoord1_buffer = ctx.buffer_device_address(mesh.texcoord1);
 
                 vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
                 for (const auto& primitive : mesh.primitives)
                 {
-                    pc.material_index = primitive.material;
-
+                    pc.noise_texture_index = materials[primitive.material].basecolor_texture;
+                    if (mi.variant_index == 1)
+                    {
+                        assert(pc.noise_texture_index >= 0);
+                    }
                     vkCmdPushConstants(command_buffer, pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
                     vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
                 }
@@ -944,10 +1088,11 @@ int main(int argc, char** argv)
 
         flow2.render(command_buffer);
         trail_blazer.render(command_buffer);
+		particle_manager.render_systems(command_buffer);
 
         vkCmdEndRendering(command_buffer);
 
-#if 1
+#if 0
         { // SDF test
             VkHelpers::begin_label(command_buffer, "SDF test", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
             DescriptorInfo desc_info[] = {
@@ -1051,7 +1196,13 @@ int main(int argc, char** argv)
 
         ctx.end_frame(command_buffer);
         frame_index++;
+
+        timer.tock();
+        cpu_time_ms = glm::mix(timer.get_elapsed_milliseconds(), cpu_time_ms, 0.95f);
     }
+
+    hot_reload_watcher_should_quit = true;
+    hot_reload_watcher.join();
 
     vkDeviceWaitIdle(ctx.device);
     vmaDestroyImage(ctx.allocator, shadowmap_texture.image, shadowmap_texture.allocation);
@@ -1071,6 +1222,7 @@ int main(int argc, char** argv)
     }
     ctx.destroy_buffer(materials_buffer);
     ctx.destroy_buffer(globals_buffer);
+    ctx.destroy_buffer(mesh_disintegrate_spawn_positions);
     vkDestroySampler(ctx.device, anisotropic_sampler, nullptr);
     vkDestroySampler(ctx.device, bilinear_sampler, nullptr);
     vkDestroySampler(ctx.device, shadow_sampler, nullptr);
@@ -1085,6 +1237,8 @@ int main(int argc, char** argv)
     surface_flow_system.destroy();
     flow2.destroy();
     trail_blazer.destroy();
+    particle_manager.destroy();
+    depth_prepass_disintegrate->builder.destroy_resources(depth_prepass_disintegrate->pipeline);
     depth_prepass->builder.destroy_resources(depth_prepass->pipeline);
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);

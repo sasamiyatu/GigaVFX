@@ -3,6 +3,7 @@
 #include "random.hlsli"
 #include "noise.hlsli"
 #include "misc.hlsli"
+#include "color.hlsli"
 
 [[vk::binding(0)]] cbuffer globals {
     ShaderGlobals globals;
@@ -57,7 +58,8 @@ void cs_emit_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p;
     p.velocity = 0;
     p.lifetime = push_constants.lifetime;
-    p.position = float3(0, 1, 0) + point_on_sphere * push_constants.emitter_radius * sqrt(float(seed.z) / float(0xFFFFFFFFu));
+    p.position = push_constants.smoke_origin + point_on_sphere * push_constants.emitter_radius * sqrt(float(seed.z) / float(0xFFFFFFFFu));
+    p.color = float4(hsv2rgb(float3(frac(globals.time * 0.02), 0.5, 0.5)), push_constants.particle_color.a);
     particles[global_particle_index + local_index] = p;
 }
 
@@ -244,7 +246,10 @@ void cs_simulate_particles( uint3 thread_id : SV_DispatchThreadID )
     GPUParticle p = particles[thread_id.x];
     if (p.lifetime > 0.0)
     {
-        p.velocity = (float3(1, 0, 0) * 3.0 + curl_noise(p.position, push_constants.time * push_constants.noise_time_scale) * push_constants.noise_scale) * push_constants.speed;
+        float age = push_constants.lifetime - p.lifetime;
+        p.color.a = smoothstep(0.0, 0.2, age) * push_constants.particle_color.a;
+        float age_scale = smoothstep(0.0, push_constants.lifetime, age) * 2.0;
+        p.velocity = (push_constants.smoke_dir * 3.0 + curl_noise(p.position, push_constants.time * push_constants.noise_time_scale) * (1 + age_scale) * push_constants.noise_scale) * push_constants.speed;
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }
@@ -319,58 +324,6 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
         sort.key = sort_key_from_float(asuint(projected)); // TODO: Float sortkey to uint
         
         particle_sort[index] = sort;
-
-#if 0
-        if (index == 0)
-        {
-            AABBPositions aabb;
-            aabb.min_x = -1.0;
-            aabb.min_y = -1.0;
-            aabb.min_z = -1.0;
-            aabb.max_x = 1.0;
-            aabb.max_y = 1.0;
-            aabb.max_z = 1.0;
-
-            aabb_positions[index] = aabb;
-        }
-
-        AccelerationStructureInstance instance;
-        instance.matrix[0][0] = push_constants.particle_size * 0.5;
-        instance.matrix[1][1] = push_constants.particle_size * 0.5;
-        instance.matrix[2][2] = push_constants.particle_size * 0.5;
-        instance.matrix[0][3] = p.position.x;
-        instance.matrix[1][3] = p.position.y;
-        instance.matrix[2][3] = p.position.z;
-        instance.mask = 0xFF;
-        instance.accelerationStructureReference = push_constants.blas_address;
-        instances[index] = instance;
-#else
-        if (index == 0)
-        {
-            AccelerationStructureInstance instance;
-            instance.matrix[0][0] = 1.0;
-            instance.matrix[1][1] = 1.0;
-            instance.matrix[2][2] = 1.0;
-            instance.matrix[0][3] = 0.0;
-            instance.matrix[1][3] = 0.0;
-            instance.matrix[2][3] = 0.0;
-            instance.mask = 0xFF;
-            instance.accelerationStructureReference = push_constants.blas_address;
-            instances[index] = instance;
-        }
-
-        AABBPositions aabb;
-        aabb.min_x = p.position.x - push_constants.particle_size * 0.5;
-        aabb.min_y = p.position.y - push_constants.particle_size * 0.5;
-        aabb.min_z = p.position.z - push_constants.particle_size * 0.5;
-        aabb.max_x = p.position.x + push_constants.particle_size * 0.5;
-        aabb.max_y = p.position.y + push_constants.particle_size * 0.5;
-        aabb.max_z = p.position.z + push_constants.particle_size * 0.5;
-
-        aabb_positions[index] = aabb;
-#endif
-
-        
     }
 }
 
@@ -411,6 +364,7 @@ struct VSOutput
     float4 position: SV_Position;
     [[vk::builtin("PointSize")]] float point_size : PSIZE;
     float3 shadow : COLOR0;
+    float4 color : COLOR1;
 };
 
 VSOutput vs_main(VSInput input)
@@ -440,6 +394,7 @@ VSOutput vs_main(VSInput input)
 
     output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
     output.shadow = shadow;
+    output.color = p.color;
     return output;
 }
 
@@ -464,6 +419,7 @@ VSOutput vs_light(VSInput input)
     float point_size = system_globals.light_resolution.x * (proj_corner.x - proj_center.x) / proj_corner.w;
 
     output.point_size = p.lifetime > 0.0 ? max(point_size, 0.71) : 0.0f;
+    output.color = p.color;
 
     return output;
 }
@@ -472,6 +428,7 @@ struct PSInput
 {
     float4 position: SV_Position;
     float3 shadow : COLOR0;
+    float4 color : COLOR1;
 };
 
 struct PSOutput
@@ -507,7 +464,7 @@ PSOutput particle_fs_shadowed(PSInput input)
     float3 shadow = input.shadow;
 
     float alpha = saturate(1.0 - dist * 2.0);
-    float4 in_color = push_constants.particle_color * float4(1, 1, 1, alpha);
+    float4 in_color = input.color * float4(1, 1, 1, alpha);
     in_color.rgb *= shadow;
     output.color = float4(in_color.rgb * in_color.a, in_color.a); // Premultiplied alpha
 

@@ -1,5 +1,6 @@
 #include "hot_reload.h"
 #include <unordered_map>
+#include "timer.h"
 
 static inline uint32_t murmur_32_scramble(uint32_t k) {
 	k *= 0xcc9e2d51;
@@ -42,14 +43,27 @@ uint32_t murmur3_32(const uint8_t* key, size_t len, uint32_t seed)
 	return h;
 }
 
-std::filesystem::path GraphicsPipelineAsset::get_filepath() const
+const std::set<std::filesystem::path>& GraphicsPipelineAsset::get_dependencies() const
 {
-	return std::filesystem::path(std::string("shaders")) / std::filesystem::path(shader_path);
+	return dependencies;
 }
 
 bool GraphicsPipelineAsset::reload_asset()
 {
-	return builder.build(&pipeline);
+	bool result = builder.build(&pipeline);
+	if (result)
+	{
+		dependencies.clear();
+		for (uint32_t i = 0; i < builder.pipeline_create_info.stageCount; ++i)
+		{
+			dependencies.insert(
+				builder.shader_sources[i].shader_source.dependencies.begin(),
+				builder.shader_sources[i].shader_source.dependencies.end()
+			);
+		}
+	}
+
+	return result;
 }
 
 size_t GraphicsPipelineAsset::get_hash()
@@ -60,13 +74,11 @@ size_t GraphicsPipelineAsset::get_hash()
 GraphicsPipelineAsset::GraphicsPipelineAsset(GraphicsPipelineBuilder build)
 	: builder(build)
 {
-	if (!builder.build(&pipeline))
+	if (!reload_asset())
 	{
 		assert(false);
 		exit(1);
 	}
-
-	shader_path = builder.shader_sources[0].shader_source.filepath;
 }
 
 struct RegisteredAsset
@@ -104,26 +116,45 @@ void AssetCatalog::register_asset(IAsset* asset)
 	RegisteredAsset new_asset{};
 	new_asset.asset = asset;
 	std::error_code ec;
-	new_asset.last_file_write = get_file_timestamp(asset->get_filepath(), ec);
+	uint64_t timestamp = 0;
+	const auto& dependencies = asset->get_dependencies();
+	for (const auto& d : dependencies)
+	{
+		timestamp = std::max(get_file_timestamp(d, ec), timestamp);
+	}
+	new_asset.last_file_write = timestamp;
 	registered_assets.push_back(new_asset);
 }
 
 bool AssetCatalog::check_for_dirty_assets()
 {
+	Timer timer;
+	timer.tick();
+
 	bool any_dirty = false;
+
 	for (auto& asset : registered_assets)
 	{
-		auto filepath = asset.asset->get_filepath();
+		const auto& dependencies = asset.asset->get_dependencies();
+		assert(!dependencies.empty() && "Logic error: Asset has no dependencies!");
 		std::error_code ec;
-		auto timestamp = get_file_timestamp(filepath, ec);
+		uint64_t timestamp = 0;
+		for (const auto& d : dependencies)
+		{
+			timestamp = std::max(get_file_timestamp(d, ec), timestamp);
+		}
 		if (timestamp != asset.last_file_write)
 		{
 			asset.dirty = true;
-			LOG_INFO("Asset %s has been updated!", filepath.string().c_str());
+			LOG_INFO("Asset has been updated!");
 		}
 
 		any_dirty = any_dirty || asset.dirty;
 	}
+
+	timer.tock();
+	//LOG_DEBUG("Checking for dirty assets took %f ms", timer.get_elapsed_milliseconds());
+
 	return any_dirty;
 }
 
@@ -139,12 +170,18 @@ bool AssetCatalog::reload_dirty_assets()
 				a.dirty = false;
 
 				std::error_code ec;
-				a.last_file_write = get_file_timestamp(a.asset->get_filepath(), ec);
-				LOG_INFO("Successfully reloaded asset %s", a.asset->get_filepath().string().c_str());
+				uint64_t timestamp = 0;
+				const auto& dependencies = a.asset->get_dependencies();
+				for (const auto& d : dependencies)
+				{
+					timestamp = std::max(get_file_timestamp(d, ec), timestamp);
+				}
+				a.last_file_write = timestamp;
+				LOG_INFO("Successfully reloaded asset");
 			}
 			else
 			{
-				LOG_ERROR("Failed to reload asset %s", a.asset->get_filepath().string().c_str());
+				LOG_ERROR("Failed to reload asset");
 				all_success = false;
 			}
 		}
@@ -157,9 +194,9 @@ void AssetCatalog::force_reload_all()
 	for (auto& a : registered_assets) a.dirty = true;
 }
 
-std::filesystem::path ComputePipelineAsset::get_filepath() const
+const std::set<std::filesystem::path>& ComputePipelineAsset::get_dependencies()  const
 {
-	return std::filesystem::path(std::string("shaders")) / std::filesystem::path(shader_path);
+	return builder.shader_source.shader_source.dependencies;
 }
 
 bool ComputePipelineAsset::reload_asset()
@@ -175,8 +212,6 @@ size_t ComputePipelineAsset::get_hash()
 ComputePipelineAsset::ComputePipelineAsset(ComputePipelineBuilder build)
 	: builder(build)
 {
-	if (!builder.build(&pipeline))
+	if (!reload_asset())
 		exit(1);
-
-	shader_path = builder.shader_source.shader_source.filepath;
 }

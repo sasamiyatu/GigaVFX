@@ -1,38 +1,39 @@
 #pragma once
 
 #include "defines.h"
-#include <filesystem>
 #include "pipeline.h"
+
+#include <set>
+#include <filesystem>
 
 struct IAsset
 {
-	virtual std::filesystem::path get_filepath() const = 0;
+	virtual const std::set<std::filesystem::path>& get_dependencies() const = 0;
 	virtual bool reload_asset() = 0;
 	virtual size_t get_hash() = 0;
 };
 
 struct GraphicsPipelineAsset : IAsset
 {
-	virtual std::filesystem::path get_filepath() const override;
+	virtual const std::set<std::filesystem::path>& get_dependencies() const override;
 	virtual bool reload_asset() override;
 	virtual size_t get_hash() override;
 
 	GraphicsPipelineAsset(GraphicsPipelineBuilder build);
 
-	std::string shader_path;
+	std::set<std::filesystem::path> dependencies;
 	GraphicsPipelineBuilder builder;
 	Pipeline pipeline;
 };
 
 struct ComputePipelineAsset : IAsset
 {
-	virtual std::filesystem::path get_filepath() const override;
+	virtual const std::set<std::filesystem::path>& get_dependencies() const override;
 	virtual bool reload_asset() override;
 	virtual size_t get_hash() override;
 
 	ComputePipelineAsset(ComputePipelineBuilder build);
 
-	std::string shader_path;
 	ComputePipelineBuilder builder;
 	Pipeline pipeline;
 };

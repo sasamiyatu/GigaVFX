@@ -1,0 +1,33 @@
+#pragma once
+
+#include <glm/glm.hpp>
+
+
+namespace Colors
+{
+#define COLOR(r, g, b) (glm::vec4(r, g, b, 255) / 255.0f)
+	static const glm::vec4
+		RED(COLOR(230, 25, 75)),
+		GREEN(COLOR(60, 180, 75)),
+		YELLOW(COLOR(255, 225, 25)),
+		BLUE(COLOR(0, 130, 200)),
+		ORANGE(COLOR(245, 130, 48)),
+		PURPLE(COLOR(145, 30, 180)),
+		CYAN(COLOR(70, 240, 240)),
+		MAGENTA(COLOR(240, 50, 230)),
+		LIME(COLOR(210, 245, 60)),
+		PINK(COLOR(250, 190, 212)),
+		TEAL(COLOR(0, 128, 128)),
+		LAVENDER(COLOR(220, 190, 255)),
+		BROWN(COLOR(170, 110, 40)),
+		BEIGE(COLOR(255, 250, 200)),
+		MAROON(COLOR(128, 0, 0)),
+		MINT(COLOR(170, 255, 195)),
+		OLIVE(COLOR(128, 128, 0)),
+		APRICOT(COLOR(255, 215, 180)),
+		NAVY(COLOR(0, 0, 128)),
+		GREY(COLOR(128, 128, 128)),
+		WHITE(COLOR(255, 255, 255)),
+		BLACK(COLOR(0, 0, 0));
+#undef COLOR
+}
