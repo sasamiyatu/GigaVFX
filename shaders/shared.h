@@ -83,6 +83,7 @@ struct ShaderGlobals
     float4x4 projection;
     float4x4 projection_inverse;
     float4x4 viewprojection;
+    float4x4 viewprojection_inverse;
     float4x4 shadow_view[4];
     float4x4 shadow_projection[4];
     float4x4 shadow_view_projection[4];
@@ -175,6 +176,7 @@ struct AccelerationStructureInstance
 
 struct GPUParticleSystemState
 {
+    uint particles_to_emit;
     uint active_particle_count;
 };
 

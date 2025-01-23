@@ -273,7 +273,7 @@ struct ParticleSystemSimple : IConfigUI
 
     // Double buffered
     Buffer particle_buffer[2] = {};
-    Buffer particle_system_state[2] = {};
+    GPUBuffer particle_system_state[2] = {};
 
     GPUBuffer emit_indirect_dispatch_buffer = {};
     Buffer indirect_dispatch_buffer = {};

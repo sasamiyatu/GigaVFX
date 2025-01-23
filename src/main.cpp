@@ -233,7 +233,8 @@ int main(int argc, char** argv)
     }
 
     Texture depth_texture{};
-    ctx.create_texture(depth_texture, WINDOW_WIDTH, WINDOW_HEIGHT, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    ctx.create_texture(depth_texture, WINDOW_WIDTH, WINDOW_HEIGHT, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, 
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
     Texture shadowmap_texture{};
     ctx.create_texture(shadowmap_texture, DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1, 4);
@@ -450,7 +451,7 @@ int main(int argc, char** argv)
 
     {
         BufferDesc desc{};
-        desc.size = sizeof(glm::vec2) * WINDOW_WIDTH * WINDOW_HEIGHT;
+        desc.size = sizeof(glm::vec3) * WINDOW_WIDTH * WINDOW_HEIGHT;
         desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
         mesh_disintegrate_spawn_positions = ctx.create_buffer(desc);
     }
@@ -459,12 +460,12 @@ int main(int argc, char** argv)
     {
         ParticleSystemSimple::Config config{};
         config.emit_and_simulate_file = "mesh_disintegrate.hlsli";
-        config.particle_capacity = 32678;
+        config.particle_capacity = 262144;
         config.name = "MeshDisintegrate";
         config.emit_indirect_dispatch_handled_externally = true;
         config.additional_descriptors = {
             DescriptorInfo(mesh_disintegrate_spawn_positions.buffer),
-            DescriptorInfo(depth_texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+            DescriptorInfo(depth_texture.view, VK_IMAGE_LAYOUT_GENERAL),
             DescriptorInfo(point_sampler)
         };
         disintegrator_system = particle_manager.add_system(config);
@@ -723,16 +724,19 @@ int main(int argc, char** argv)
         glm::mat4 shadow_views[4];
         glm::mat4 shadow_view_projs[4];
         { // Update global uniform buffer
+            glm::ivec2 resolution;
+			SDL_GetWindowSizeInPixels(ctx.window, &resolution.x, &resolution.y);
             ShaderGlobals globals{};
             globals.view = glm::lookAt(camera.position, camera.position + camera.forward, camera.up);
             globals.view_inverse = glm::inverse(globals.view);
             globals.projection = glm::perspective(camera.fov, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, camera.znear, camera.zfar);
             globals.projection_inverse = glm::inverse(globals.projection);
             globals.viewprojection = globals.projection * globals.view;
+            globals.viewprojection_inverse = glm::inverse(globals.viewprojection);
             globals.camera_pos = glm::vec4(camera.position, 1.0f);
             globals.sun_direction = glm::vec4(sundir, 1.0f);
             globals.sun_color_and_intensity = glm::vec4(1.0f);
-            globals.resolution = glm::vec2((float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
+            globals.resolution = glm::vec2(resolution);
             globals.frame_index = frame_index;
             globals.time = (float)elapsed_time;
 
@@ -951,6 +955,7 @@ int main(int argc, char** argv)
             DescriptorInfo descriptor_info[] = {
                 DescriptorInfo(globals_buffer),
                 DescriptorInfo(bilinear_sampler),
+                DescriptorInfo(disintegrator_system->particle_system_state[0]),
                 DescriptorInfo(disintegrator_system->emit_indirect_dispatch_buffer),
 				DescriptorInfo(mesh_disintegrate_spawn_positions.buffer),
             };

@@ -2,7 +2,7 @@
 #include "noise.hlsli"
 #include "color.hlsli"
 
-bool particle_init(inout GPUParticle p, float delta_time, uint4 seed)
+bool particle_init(uint3 thread_id, inout GPUParticle p, float delta_time, uint4 seed)
 {
     float3 sphere_pos = emit_uniform_sphere(seed);
     float3 color = normalize(sphere_pos) * 0.5 + 0.5;
@@ -43,7 +43,7 @@ float3 sdf_normal( in float3 p ) // for function f(p)
 }
 
 
-bool particle_update(inout GPUParticle p, float delta_time, uint4 seed)
+bool particle_update(uint3 thread_id, inout GPUParticle p, float delta_time, uint4 seed)
 {
     float3 acceleration = float3(0, -9.8, 0) * delta_time;
     float drag = 0.5;

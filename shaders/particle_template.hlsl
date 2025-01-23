@@ -4,10 +4,6 @@
 // #include "noise.hlsli"
 // #include "misc.hlsli"
 
-// The following functions are expected to be defined in a file that is included at compile time:
-bool particle_init(inout GPUParticle p, float delta_time, uint4 seed);
-bool particle_update(inout GPUParticle p, float delta_time, uint4 seed);
-
 [[vk::binding(0)]] cbuffer globals {
     ShaderGlobals globals;
 }
@@ -24,11 +20,15 @@ bool particle_update(inout GPUParticle p, float delta_time, uint4 seed);
 [[vk::push_constant]]
 ParticleTemplatePushConstants push_constants;
 
+// The following functions are expected to be defined in a file that is included at compile time:
+bool particle_init(uint3 thread_id, inout GPUParticle p, float delta_time, uint4 seed);
+bool particle_update(uint3 thread_id, inout GPUParticle p, float delta_time, uint4 seed);
+
 [numthreads(64, 1, 1)]
 void emit( uint3 thread_id : SV_DispatchThreadID )
 {
-    // if (thread_id.x >= push_constants.particles_to_spawn)
-    //     return;
+    if (thread_id.x >= particle_system_state[0].particles_to_emit)
+        return;
 
     if (thread_id.x == 0)
     {
@@ -37,11 +37,14 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
     }
 
     if (particle_system_state[0].active_particle_count >= push_constants.particle_capacity)
+    {
+        printf("Full capacity! Can't emit");
         return;
+    }
 
     uint4 seed = uint4(thread_id.xy, globals.frame_index, 42);
     GPUParticle p = (GPUParticle)0;
-    bool spawned = particle_init(p, push_constants.delta_time, seed);
+    bool spawned = particle_init(thread_id, p, push_constants.delta_time, seed);
     if (!spawned)
         return;
 
@@ -67,6 +70,8 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     if (thread_id.x >= particle_system_state[0].active_particle_count)
         return;
 
+    if (thread_id.x == 0) printf("Active count: %d", particle_system_state[0].active_particle_count);
+
     if (thread_id.x == 0)
     {
         indirect_draw[0].vertexCount = 1;
@@ -76,7 +81,7 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
 
     GPUParticle p = particles[thread_id.x];
     uint4 seed = uint4(thread_id.xy, globals.frame_index, 1337);
-    bool alive = particle_update(p, push_constants.delta_time, seed);
+    bool alive = particle_update(thread_id, p, push_constants.delta_time, seed);
 
     uint local_index = WavePrefixCountBits(alive);
     uint alive_count = WaveActiveCountBits(alive);

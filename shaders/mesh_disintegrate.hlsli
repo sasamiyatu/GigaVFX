@@ -1,16 +1,16 @@
 #include "particle_emitters.hlsli"
 #include "color.hlsli"
 
-[[vk::binding(7)]] RWStructuredBuffer<float2> spawn_uvs;
+[[vk::binding(7)]] StructuredBuffer<float3> spawn_pos;
 [[vk::binding(8)]] Texture2D depth_texture;
-[[vk::binding(9)]] Texture2D depth_sampler;
+[[vk::binding(9)]] SamplerState depth_sampler;
 
-bool particle_init(inout GPUParticle p, float delta_time, uint4 seed)
+bool particle_init(uint3 thread_id, inout GPUParticle p, float delta_time, uint4 seed)
 {
-    if (seed.x == 0) printf("Emitting");
+    float3 wpos = spawn_pos[thread_id.x];
     float3 sphere_pos = emit_uniform_sphere(seed);
     float3 color = normalize(sphere_pos) * 0.5 + 0.5;
-    p.position = float3(-4, 1, 0) + sphere_pos * 0.2;
+    p.position = wpos;
     //float3 dir = float3(sin(globals.time), 0.0f, cos(globals.time));
     float3 dir = float3(0, 1, 0);
     float3 random_dir = emit_uniform_sphere(seed);
@@ -18,10 +18,10 @@ bool particle_init(inout GPUParticle p, float delta_time, uint4 seed)
 
     dir = lerp(random_dir, dir, 0.85);
 
-    p.velocity = dir * speed;
+    //p.velocity = dir * speed;
     p.position += uniform_random(seed).x * delta_time * p.velocity;
-    p.lifetime = p.max_lifetime = uniform_random(seed).x * 0.4 + 0.8;
-    p.size = 0.1;
+    p.lifetime = p.max_lifetime = 1.0;
+    p.size = 0.005;
     //p.color = float4(uniform_random(seed).rgb, 1.0);
 
     return true;
@@ -47,14 +47,15 @@ float3 sdf_normal( in float3 p ) // for function f(p)
 }
 
 
-bool particle_update(inout GPUParticle p, float delta_time, uint4 seed)
+bool particle_update(uint3 thread_id, inout GPUParticle p, float delta_time, uint4 seed)
 {
+    if (thread_id.x == 0) printf("Disintegrate update");
     float3 acceleration = float3(0, -9.8, 0) * delta_time;
     float drag = 0.5;
     acceleration += -p.velocity * drag * delta_time;
     p.velocity += acceleration;
     p.position += p.velocity * delta_time;
-    p.size = p.lifetime / p.max_lifetime * 0.1;
+    //p.size = p.lifetime / p.max_lifetime * 0.1;
     p.lifetime -= delta_time;
 
     return p.lifetime > 0;

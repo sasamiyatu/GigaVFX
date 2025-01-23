@@ -1847,7 +1847,7 @@ void ParticleSystemSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat 
 			desc.size = sizeof(GPUParticleSystemState);
 			desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 				VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-			particle_system_state[i] = ctx->create_buffer(desc);
+			particle_system_state[i] = ctx->create_gpu_buffer(desc);
 		}
 	}
 
@@ -1880,7 +1880,7 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt)
 		for (int i = 0; i < 2; ++i)
 		{
 			vkCmdFillBuffer(cmd, particle_buffer[i].buffer, 0, VK_WHOLE_SIZE, 0);
-			vkCmdFillBuffer(cmd, particle_system_state[i].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, particle_system_state[i], 0, VK_WHOLE_SIZE, 0);
 		}
 
 		{
@@ -1911,9 +1911,9 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt)
 		DescriptorInfo descriptor_info[] = {
 			DescriptorInfo(shader_globals),
 			DescriptorInfo(particle_buffer[0].buffer),
-			DescriptorInfo(particle_system_state[0].buffer),
+			DescriptorInfo(particle_system_state[0]),
 			DescriptorInfo(particle_buffer[1].buffer),
-			DescriptorInfo(particle_system_state[1].buffer),
+			DescriptorInfo(particle_system_state[1]),
 			DescriptorInfo(indirect_dispatch_buffer.buffer),
 			DescriptorInfo(indirect_draw_buffer.buffer),
 		};
@@ -1931,23 +1931,35 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt)
 
 		{ // Clear output state
 			VkHelpers::begin_label(cmd, "Clear buffers", Colors::BEIGE);
-			vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, particle_system_state[1], 0, VK_WHOLE_SIZE, 0);
 			vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
 			if (!emit_indirect_dispatch_handled_externally)
 			{
-				// Write it ourselves
-				DispatchIndirectCommand dispatch{};
+				{
+					// Write it ourselves
+					DispatchIndirectCommand dispatch{};
 
-				dispatch.x = get_dispatch_size(push_constants.particles_to_spawn);
-				dispatch.y = 1;
-				dispatch.z = 1;
+					dispatch.x = get_dispatch_size(push_constants.particles_to_spawn);
+					dispatch.y = 1;
+					dispatch.z = 1;
 
-				void* mapped;
-				ctx->map_buffer(emit_indirect_dispatch_buffer, &mapped);
-				memcpy(mapped, &dispatch, sizeof(dispatch));
-				ctx->unmap_buffer(emit_indirect_dispatch_buffer);
-				ctx->upload_buffer(emit_indirect_dispatch_buffer, cmd);
+					void* mapped;
+					ctx->map_buffer(emit_indirect_dispatch_buffer, &mapped);
+					memcpy(mapped, &dispatch, sizeof(dispatch));
+					ctx->unmap_buffer(emit_indirect_dispatch_buffer);
+					ctx->upload_buffer(emit_indirect_dispatch_buffer, cmd);
+				}
+				{
+					uint32_t emit_count = push_constants.particles_to_spawn;
+					GPUParticleSystemState state{};
+					state.particles_to_emit = emit_count;
+					void* mapped;
+					ctx->map_buffer(particle_system_state[0], &mapped);
+					memcpy(mapped, &state, sizeof(state));
+					ctx->unmap_buffer(particle_system_state[0]);
+					ctx->upload_buffer(particle_system_state[0], cmd, offsetof(state, particles_to_emit), sizeof(state.particles_to_emit));
+				}
 			}
 			VkHelpers::end_label(cmd);
 		}
@@ -2005,7 +2017,7 @@ void ParticleSystemSimple::simulate(VkCommandBuffer cmd, float dt)
 		for (int i = 0; i < 2; ++i)
 		{
 			vkCmdFillBuffer(cmd, particle_buffer[i].buffer, 0, VK_WHOLE_SIZE, 0);
-			vkCmdFillBuffer(cmd, particle_system_state[i].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, particle_system_state[i], 0, VK_WHOLE_SIZE, 0);
 		}
 
 		particles_initialized = true;
@@ -2016,9 +2028,9 @@ void ParticleSystemSimple::simulate(VkCommandBuffer cmd, float dt)
 		DescriptorInfo descriptor_info[] = {
 			DescriptorInfo(shader_globals),
 			DescriptorInfo(particle_buffer[0].buffer),
-			DescriptorInfo(particle_system_state[0].buffer),
+			DescriptorInfo(particle_system_state[0]),
 			DescriptorInfo(particle_buffer[1].buffer),
-			DescriptorInfo(particle_system_state[1].buffer),
+			DescriptorInfo(particle_system_state[1]),
 			DescriptorInfo(indirect_dispatch_buffer.buffer),
 			DescriptorInfo(indirect_draw_buffer.buffer),
 		};
@@ -2031,7 +2043,7 @@ void ParticleSystemSimple::simulate(VkCommandBuffer cmd, float dt)
 
 		{ // Clear output state
 			VkHelpers::begin_label(cmd, "Clear buffers", Colors::BEIGE);
-			vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
+			vkCmdFillBuffer(cmd, particle_system_state[1], 0, VK_WHOLE_SIZE, 0);
 			vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
 			{
