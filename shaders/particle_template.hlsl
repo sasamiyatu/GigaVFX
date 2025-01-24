@@ -70,8 +70,6 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     if (thread_id.x >= particle_system_state[0].active_particle_count)
         return;
 
-    if (thread_id.x == 0) printf("Active count: %d", particle_system_state[0].active_particle_count);
-
     if (thread_id.x == 0)
     {
         indirect_draw[0].vertexCount = 1;

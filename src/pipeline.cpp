@@ -218,7 +218,13 @@ bool GraphicsPipelineBuilder::build(Pipeline* out_pipeline)
     for (size_t i = 0; i < pipeline_create_info.stageCount; ++i)
     {
         shader_sources[i].spirv = Shaders::load_shader(shader_sources[i].shader_source, pipeline_create_info.pStages[i].stage, &shader_sources[i].size);
-        if (!shader_sources[i].spirv) return false;
+        if (!shader_sources[i].spirv)
+        {
+			for (size_t j = 0; j < i; ++j)
+				vkDestroyShaderModule(device, shader_stage_create_info[j].module, nullptr);
+
+            return false;
+        }
         shader_stage_create_info[i].pName = shader_sources[i].shader_source.entry_point.c_str();
 
 		for (const auto& sc : shader_sources[i].shader_source.specialization_constants)

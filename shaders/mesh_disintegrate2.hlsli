@@ -1,7 +1,5 @@
 #include "particle_emitters.hlsli"
 #include "color.hlsli"
-#include "noise.hlsli"
-#include "bitangent_noise.hlsli"
 
 [[vk::binding(7)]] StructuredBuffer<float3> spawn_pos;
 [[vk::binding(8)]] Texture2D depth_texture;
@@ -22,7 +20,7 @@ bool particle_init(uint3 thread_id, inout GPUParticle p, float delta_time, uint4
 
     //p.velocity = dir * speed;
     p.position += uniform_random(seed).x * delta_time * p.velocity;
-    p.lifetime = p.max_lifetime = uniform_random(seed.y) * 0.5 + 0.5;
+    p.lifetime = p.max_lifetime = 10.0;
     p.size = 0.005;
     //p.color = float4(uniform_random(seed).rgb, 1.0);
 
@@ -51,13 +49,40 @@ float3 sdf_normal( in float3 p ) // for function f(p)
 
 bool particle_update(uint3 thread_id, inout GPUParticle p, float delta_time, uint4 seed)
 {
-    float drag = 0.5;
-    float3 wind = (float3(0, 3, 0) + BitangentNoise4D(float4(p.position, globals.time)) * 0.4);
-    float3 force = drag * (wind - p.velocity);
+    const float drag = 0.5;
+    const float restitution = 0.5;
+    const float friction = 0.9;
+    float3 gravitational_force = float3(0, -9.8, 0);
+    float3 wind_velocity = float3(-5, 0, 0);
+    float3 air_resistance = drag * (wind_velocity - p.velocity);
 
-    p.velocity += force * delta_time;
+    float3 acceleration = air_resistance + gravitational_force;
+
+    if (dot(p.velocity, p.velocity) < 1e-3)
+    {
+        if (abs(p.position.y) < 1e-3)
+        {
+            p.velocity = 0;
+            acceleration = 0;
+        }       
+    }
+
+
+    p.velocity += acceleration * delta_time;
+
+    float height_before = p.position.y;
     p.position += p.velocity * delta_time;
+    float height_after = p.position.y;
 
+    if (sign(height_before) != sign(height_after))
+    {
+        float3 n = float3(0, 1, 0);
+        float3 vn = dot(p.velocity, n) * n;
+        float3 vt = p.velocity - vn;
+        p.position -= height_after * n * (1 + restitution);
+        p.velocity = -restitution * vn + (1 - friction) * vt;
+    }
+    //p.size = p.lifetime / p.max_lifetime * 0.1;
     p.lifetime -= delta_time;
 
     return p.lifetime > 0;
@@ -69,13 +94,13 @@ bool particle_shade(GPUParticle p, float2 uv, out float4 color)
     if (dist > 0.5) return false;
 
     float t = 1 - p.lifetime / p.max_lifetime;
-    float3 c = iq_palette(t,
+    float3 c = iq_palette(0,
         float3(0.5, 0.5, 0.5),
         float3(0.5, 0.5, 0.5),
         float3(1.0, 1.0, 1.0),
         float3(0.00, 0.10, 0.20));
 
-    float alpha = 1.0  - smoothstep(0.25, 1.0, t);
+    float alpha = 1.0  - smoothstep(0.5, 1.0, t);
 
     color = float4(c * alpha, alpha);
 

@@ -54,10 +54,10 @@ float4 grad4(float j, float4 ip)
 }
 
 // (sqrt(5) - 1)/4 = F4, used once below
-#define F4 0.309016994374947451
 
 float snoise(float4 v)
 {
+    const float F4 = 0.309016994374947451;
     const float4  C = float4( 0.138196601125011,  // (5 - sqrt(5))/20  G4
                         0.276393202250021,  // 2 * G4
                         0.414589803375032,  // 3 * G4
