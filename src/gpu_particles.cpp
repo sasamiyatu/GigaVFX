@@ -551,7 +551,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
-		//vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
 		//vkCmdFillBuffer(cmd, particle_aabbs.buffer, 0, VK_WHOLE_SIZE, 0);
 		//vkCmdFillBuffer(cmd, instances_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
@@ -663,7 +663,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		{
 			radix_sort_vk_sort_indirect_info sort_info{};
 			sort_info.key_bits = 32;
-			sort_info.count = { particle_system_state[1].buffer, 0, VK_WHOLE_SIZE};
+			sort_info.count = { particle_system_state[1].buffer, offsetof(GPUParticleSystemState, active_particle_count), sizeof(uint32_t)};
 			sort_info.keyvals_even = { sort_keyval_buffer[0].buffer, 0, VK_WHOLE_SIZE };
 			sort_info.keyvals_odd = { sort_keyval_buffer[1].buffer, 0, VK_WHOLE_SIZE };
 			sort_info.internal = { sort_internal_buffer.buffer, 0, VK_WHOLE_SIZE };
@@ -686,80 +686,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 			0, nullptr,
 			0, nullptr);
 	}
-
-#if 0
-
-	{ // Build bottom level acceleration structure
-
-		VkAccelerationStructureGeometryKHR blas_geometry{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
-		blas_geometry.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
-		blas_geometry.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
-		blas_geometry.geometry.aabbs.data.deviceAddress = VkHelpers::get_buffer_device_address(ctx->device, particle_aabbs.buffer);
-		blas_geometry.geometry.aabbs.stride = sizeof(AABBPositions);
-
-		VkAccelerationStructureBuildGeometryInfoKHR build_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
-
-		build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-		build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-		build_info.dstAccelerationStructure = blas.acceleration_structure;
-		build_info.geometryCount = 1;
-		build_info.pGeometries = &blas_geometry;
-		build_info.scratchData.deviceAddress = VkHelpers::get_buffer_device_address(ctx->device, blas.scratch_buffer.buffer);
-
-		VkAccelerationStructureBuildRangeInfoKHR build_range_info{};
-		build_range_info.primitiveCount = particle_capacity;
-		build_range_info.primitiveOffset = 0;
-		build_range_info.firstVertex = 0;
-		build_range_info.transformOffset = 0;
-
-		VkAccelerationStructureBuildRangeInfoKHR* range_ptr = &build_range_info;
-		vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_info, &range_ptr);
-
-		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		memory_barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		vkCmdPipelineBarrier(cmd,
-			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-			0,
-			1, &memory_barrier,
-			0, nullptr,
-			0, nullptr);
-	}
-
-
-	{ // Build TLAS
-		VkAccelerationStructureGeometryKHR geometries{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
-		geometries.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-		geometries.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-		geometries.geometry.instances.data.deviceAddress = VkHelpers::get_buffer_device_address(ctx->device, instances_buffer.buffer);
-
-		VkAccelerationStructureBuildGeometryInfoKHR build_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
-
-		build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-		build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-		build_info.dstAccelerationStructure = tlas.acceleration_structure;
-		build_info.geometryCount = 1;
-		build_info.pGeometries = &geometries;
-		build_info.scratchData.deviceAddress = VkHelpers::get_buffer_device_address(ctx->device, tlas.scratch_buffer.buffer);
-
-		VkAccelerationStructureBuildRangeInfoKHR ri{};
-		ri.primitiveCount = 1;
-
-		VkAccelerationStructureBuildRangeInfoKHR* range_info = &ri;
-
-		vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_info, &range_info);
-
-		VkMemoryBarrier memory_barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		memory_barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-		memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		vkCmdPipelineBarrier(cmd,
-			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-			0,
-			1, &memory_barrier,
-			0, nullptr,
-			0, nullptr);
-	}
-#endif
 
 #if 0
 	{ // Debug sort

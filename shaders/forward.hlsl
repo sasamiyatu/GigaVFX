@@ -3,6 +3,7 @@
 #include "math.hlsli"
 #include "misc.hlsli"
 #include "pcss.hlsli"
+#include "color.hlsli"
 
 #define BINDLESS_DESCRIPTOR_SET_INDEX 1
 
@@ -125,6 +126,14 @@ PSOutput fs_main(VSOutput input)
     Material material = materials.Load(push_constants.material_index);
     MaterialContext material_context = load_material_context(input, material);
     //if (material_context.basecolor.a < material.alpha_cutoff) discard;
+
+    if (material_context.basecolor.x - push_constants.disintegrate_alpha_reference < 0.1)
+    {
+        float t = (material_context.basecolor.x - push_constants.disintegrate_alpha_reference) / 0.1;
+        float3 c = iq_palette(t, float3(0.8,0.4,0.1),float3(0.5,0.5,0.2),float3(0.5,0.6,0.5),float3(0.0,0.0,0.0) );
+
+        material_context.basecolor.rgb *= c;
+    }
 
     float3 V = normalize(globals.camera_pos.xyz - input.world_position);
     float3 N = material_context.shading_normal;

@@ -281,9 +281,13 @@ void cs_write_draw( uint3 thread_id : SV_DispatchThreadID )
         ? active_particles
         : (active_particles + push_constants.num_slices - 1) / push_constants.num_slices;
 
+    uint32_t total_draws = active_particles;
+    uint32_t draws_per_slice = (total_draws + push_constants.num_slices - 1) / push_constants.num_slices;
+    uint draws_left = max(0, int(total_draws) - int(draws_per_slice * thread_id.x));
+
     DrawIndirectCommand draw_cmd;
     draw_cmd.vertexCount = 1;
-    draw_cmd.instanceCount = draw_count;
+    draw_cmd.instanceCount = min(draws_left, draws_per_slice);
     draw_cmd.firstVertex = 0;
     draw_cmd.firstInstance = draw_count * thread_id.x;
 
@@ -321,8 +325,8 @@ void cs_compact_particles( uint3 thread_id : SV_DispatchThreadID )
         float projected = dot(push_constants.sort_axis, p.position);
         GPUParticleSort sort;
         sort.index = index;
-        sort.key = sort_key_from_float(asuint(projected)); // TODO: Float sortkey to uint
-        
+        sort.key = sort_key_from_float(asuint(projected));
+
         particle_sort[index] = sort;
     }
 }

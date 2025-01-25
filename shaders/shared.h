@@ -46,6 +46,7 @@ struct PushConstantsForward
     uint64_t texcoord0_buffer;
     uint64_t texcoord1_buffer;
     int material_index;
+    float disintegrate_alpha_reference; // For disintegrate effect
 };
 
 struct DepthPrepassPushConstants

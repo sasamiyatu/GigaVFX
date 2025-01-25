@@ -69,11 +69,15 @@ bool particle_shade(GPUParticle p, float2 uv, out float4 color)
     if (dist > 0.5) return false;
 
     float t = 1 - p.lifetime / p.max_lifetime;
-    float3 c = iq_palette(t,
-        float3(0.5, 0.5, 0.5),
-        float3(0.5, 0.5, 0.5),
-        float3(1.0, 1.0, 1.0),
-        float3(0.00, 0.10, 0.20));
+    // float3 c = iq_palette(t,
+    //     float3(0.5, 0.5, 0.5),
+    //     float3(0.5, 0.5, 0.5),
+    //     float3(1.0, 1.0, 1.0),
+    //     float3(0.00, 0.10, 0.20));
+
+    float3 c = iq_palette(t, float3(0.8,0.4,0.1),float3(0.5,0.5,0.2),float3(0.5,0.6,0.5),float3(0.0,0.0,0.0) );
+    float3 brightness = 1 - smoothstep(0.0, 1.0, t);
+    c *= brightness;
 
     float alpha = 1.0  - smoothstep(0.25, 1.0, t);
 

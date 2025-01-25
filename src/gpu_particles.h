@@ -77,6 +77,7 @@ struct GPUParticleSystem : IConfigUI
     glm::vec3 position = glm::vec3(0.0f);
     uint32_t particle_capacity = 0;
     float particle_spawn_rate = 10000.0f;
+    //float particle_spawn_rate = 1.0f;
     float particles_to_spawn = 0.0f;
     bool particles_initialized = false;
     float particle_size = 0.05f; // World space
