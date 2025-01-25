@@ -82,7 +82,6 @@ static uint32_t get_dispatch_size(uint32_t particle_capacity)
 
 void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, uint32_t particle_capacity, 
 	const Texture& shadowmap_texture, uint32_t cascade_index, const ShaderInfo& emit_shader, const ShaderInfo& update_shader, 
-	const SDF* sdf,
 	bool emit_once)
 {
 	assert(shadowmap_texture.width != 0);
@@ -423,21 +422,6 @@ void GPUParticleSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 			VK_CHECK(vkCreateSampler(ctx->device, &info, nullptr, &light_sampler));
 		}
 	}
-
-	// SDF stuff used for mesh based simulation
-	{
-		this->sdf = sdf;
-
-		VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-		info.magFilter = VK_FILTER_LINEAR;
-		info.minFilter = VK_FILTER_LINEAR;
-		info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		info.maxLod = VK_LOD_CLAMP_NONE;
-		info.maxAnisotropy = 1;
-		VK_CHECK(vkCreateSampler(ctx->device, &info, nullptr, &sdf_sampler));
-	}
 }
 
 void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& camera_state, glm::mat4 shadow_view, glm::mat4 shadow_projection)
@@ -524,8 +508,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		DescriptorInfo(indirect_draw_buffer.buffer),
 		DescriptorInfo(light_sampler),
 		DescriptorInfo(light_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
-		DescriptorInfo(sdf_sampler),
-		DescriptorInfo(sdf->texture.view, sdf->texture.layout),
 	};
 
 	// Likewise for push constants
@@ -541,9 +523,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 	push_constants.lifetime = particle_lifetime;
 	push_constants.noise_scale = noise_scale;
 	push_constants.noise_time_scale = noise_time_scale;
-	push_constants.sdf_grid_dims = sdf->dims;
-	push_constants.sdf_grid_spacing = sdf->grid_spacing;
-	push_constants.sdf_origin = sdf->grid_origin + glm::vec3(0.0f, 5.0f, 0.0f);
 	push_constants.particle_capacity = particle_capacity;
 	push_constants.smoke_dir = smoke_dir;
 	push_constants.smoke_origin = smoke_origin;
@@ -948,7 +927,6 @@ void GPUParticleSystem::destroy()
 	particle_render_target.destroy(ctx->device, ctx->allocator);
 	light_render_target.destroy(ctx->device, ctx->allocator);
 	vkDestroySampler(ctx->device, light_sampler, nullptr);
-	vkDestroySampler(ctx->device, sdf_sampler, nullptr);
 	render_pipeline_back_to_front->builder.destroy_resources(render_pipeline_back_to_front->pipeline);
 	render_pipeline_front_to_back->builder.destroy_resources(render_pipeline_front_to_back->pipeline);
 	render_pipeline_light->builder.destroy_resources(render_pipeline_light->pipeline);

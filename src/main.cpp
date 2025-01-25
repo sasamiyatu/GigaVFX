@@ -424,17 +424,9 @@ int main(int argc, char** argv)
     constexpr uint32_t particle_capacity = 1048576;
     GPUParticleSystem smoke_system;
     smoke_system.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT, particle_capacity, shadowmap_texture, 1,
-        {"gpu_particles.hlsl", "cs_emit_particles"}, {"gpu_particles.hlsl", "cs_simulate_particles"}, &sdf);
+        {"gpu_particles.hlsl", "cs_emit_particles"}, {"gpu_particles.hlsl", "cs_simulate_particles"});
     smoke_system.set_position(glm::vec3(0.0f, 0.0f, 0.0f));
     config_uis.push_back(&smoke_system);
-
-#if 0 
-    GPUParticleSystem surface_flow_system;
-    surface_flow_system.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT, 3000, shadowmap_texture, 1,
-        { "gpu_particles.hlsl", "emit_sphere" }, { "gpu_particles.hlsl", "update_simple" }, &sdf, true);
-    surface_flow_system.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
-    config_uis.push_back(&surface_flow_system);
-#endif
 
     GPUSurfaceFlowSystem flow2;
     flow2.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT, 30000,
@@ -817,7 +809,6 @@ int main(int argc, char** argv)
         VkHelpers::end_label(command_buffer);
 
         smoke_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
-        //surface_flow_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
         flow2.simulate(command_buffer, (float)delta_time);
         trail_blazer.simulate(command_buffer, (float)delta_time);
 
@@ -1043,7 +1034,6 @@ int main(int argc, char** argv)
         }
 
         smoke_system.render(command_buffer, depth_texture);
-        //surface_flow_system.render(command_buffer, depth_texture);
 
         { // Forward pass
             VkHelpers::begin_label(command_buffer, "Forward pass", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
@@ -1153,7 +1143,6 @@ int main(int argc, char** argv)
 #endif
 
         smoke_system.composite(command_buffer, hdr_render_target);
-        //surface_flow_system.composite(command_buffer, hdr_render_target);
 
 #if 0
         DescriptorInfo desc_info[] = {
@@ -1268,7 +1257,6 @@ int main(int argc, char** argv)
     }
     sdf.texture.destroy(ctx.device, ctx.allocator);
     smoke_system.destroy();
-    //surface_flow_system.destroy();
     flow2.destroy();
     trail_blazer.destroy();
     particle_manager.destroy();
