@@ -1922,7 +1922,6 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt)
 	}
 
 	{
-
 		// Likewise for push constants
 		ParticleTemplatePushConstants push_constants{};
 		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;

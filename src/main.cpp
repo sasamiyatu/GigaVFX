@@ -334,6 +334,25 @@ int main(int argc, char** argv)
     GraphicsPipelineAsset* shadowmap_pipeline = new GraphicsPipelineAsset(shadowmap_builder);
     AssetCatalog::register_asset(shadowmap_pipeline);
 
+    GraphicsPipelineAsset* shadowmap_disintegrate_pipeline = nullptr;
+    {
+        GraphicsPipelineBuilder builder(ctx.device, true);
+		ShaderSource fragment_source("shadowmap.hlsl", "fs_main");
+		fragment_source.add_specialization_constant(1, true);
+        builder
+            .set_vertex_shader_filepath("shadowmap.hlsl")
+			.set_fragment_shader_source(fragment_source)
+            .set_cull_mode(VK_CULL_MODE_NONE)
+            .set_depth_format(VK_FORMAT_D32_SFLOAT)
+            .set_depth_test(VK_TRUE)
+            .set_depth_write(VK_TRUE)
+            .set_depth_compare_op(VK_COMPARE_OP_LESS)
+            .set_view_mask(0b1111)
+            .set_descriptor_set_layout(1, ctx.bindless_descriptor_set_layout);
+        shadowmap_disintegrate_pipeline = new GraphicsPipelineAsset(builder);
+		AssetCatalog::register_asset(shadowmap_disintegrate_pipeline);
+    }
+
     ComputePipelineBuilder compute_builder(ctx.device, true);
     compute_builder
         .set_shader_filepath("procedural_sky.hlsl");
@@ -676,6 +695,9 @@ int main(int argc, char** argv)
         double elapsed_time = (tick - start_tick) * inv_pfreq;
         current_tick = tick;
 
+        const float disintegrate_alpha_reference = glm::fract(elapsed_time * 0.1f);
+		const float disintegrate_prev_alpha_reference = glm::fract((elapsed_time - delta_time) * 0.1f);
+
         particle_system_manager.update((float)delta_time);
 
         if (needs_hot_reload)
@@ -899,25 +921,29 @@ int main(int argc, char** argv)
 
             for (const auto& mi : mesh_draws)
             {
+				if (mi.variant_index == 1) vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowmap_disintegrate_pipeline->pipeline.pipeline);
+
                 const Mesh& mesh = meshes[mi.mesh_index];
 
-                PushConstantsForward pc{};
+                DepthPrepassPushConstants pc{};
                 static_assert(sizeof(pc) <= 128);
 
                 pc.model = mi.transform;
-
                 pc.position_buffer = ctx.buffer_device_address(mesh.position);
-                if (mesh.normal) pc.normal_buffer = ctx.buffer_device_address(mesh.normal);
-                if (mesh.tangent) pc.tangent_buffer = ctx.buffer_device_address(mesh.tangent);
+				pc.alpha_reference = disintegrate_alpha_reference;
+                pc.prev_alpha_reference = disintegrate_prev_alpha_reference;
                 if (mesh.texcoord0) pc.texcoord0_buffer = ctx.buffer_device_address(mesh.texcoord0);
-                if (mesh.texcoord1) pc.texcoord1_buffer = ctx.buffer_device_address(mesh.texcoord1);
 
                 vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
                 for (const auto& primitive : mesh.primitives)
                 {
-                    pc.material_index = primitive.material;
+                    pc.noise_texture_index = materials[primitive.material].basecolor_texture;
+                    if (mi.variant_index == 1)
+                    {
+                        assert(pc.noise_texture_index >= 0);
+                    }
 
-                    vkCmdPushConstants(command_buffer, shadowmap_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
+                    vkCmdPushConstants(command_buffer, shadowmap_pipeline->pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
                     vkCmdDrawIndexed(command_buffer, primitive.index_count, 1, primitive.first_index, primitive.first_vertex, 0);
                 }
             }
@@ -974,8 +1000,8 @@ int main(int argc, char** argv)
 
                 pc.model = mi.transform;
                 pc.position_buffer = ctx.buffer_device_address(mesh.position);
-                pc.alpha_reference = glm::fract(elapsed_time * 0.1f);
-				pc.prev_alpha_reference = glm::fract((elapsed_time - delta_time) * 0.1f);
+                pc.alpha_reference = disintegrate_alpha_reference;
+                pc.prev_alpha_reference = disintegrate_prev_alpha_reference;
                 if (mesh.texcoord0) pc.texcoord0_buffer = ctx.buffer_device_address(mesh.texcoord0);
 
                 vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -1247,6 +1273,7 @@ int main(int argc, char** argv)
     depth_prepass->builder.destroy_resources(depth_prepass->pipeline);
     pipeline->builder.destroy_resources(pipeline->pipeline);
     shadowmap_pipeline->builder.destroy_resources(shadowmap_pipeline->pipeline);
+    shadowmap_disintegrate_pipeline->builder.destroy_resources(shadowmap_disintegrate_pipeline->pipeline);
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
     tonemap_pipeline->builder.destroy_resources(tonemap_pipeline->pipeline);
     test_pipeline->builder.destroy_resources(test_pipeline->pipeline);

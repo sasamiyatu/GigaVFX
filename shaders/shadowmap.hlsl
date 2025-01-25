@@ -3,6 +3,8 @@
 #include "math.hlsli"
 #include "misc.hlsli"
 
+[[vk::constant_id(1)]] const bool CAN_DISINTEGRATE = false;
+
 #define BINDLESS_DESCRIPTOR_SET_INDEX 1
 
 struct VSInput
@@ -26,7 +28,8 @@ struct VSOutput
 [[vk::binding(2)]] StructuredBuffer<Material> materials;
 
 [[vk::push_constant]]
-PushConstantsForward push_constants;
+DepthPrepassPushConstants push_constants;
+//PushConstantsForward push_constants;
 
 VSOutput vs_main(VSInput input)
 {
@@ -39,29 +42,13 @@ VSOutput vs_main(VSInput input)
     return output;
 }
 
-struct PSOutput
+void fs_main(VSOutput input)
 {
-    float4 color: SV_Target0;
-};
-
-struct MaterialContext
-{
-    float4 basecolor;
-    float3 smooth_normal;
-    float3 shading_normal;
-    float3 f0;
-    float metallic;
-    float roughness;
-};
-
-PSOutput fs_main(VSOutput input)
-{
-    PSOutput output = (PSOutput)0;
-    //float4 basecolor = basecolor_texture.Sample(bilinear_sampler, input.texcoord0);
-    //Material material = materials.Load(push_constants.material_index);
-    //MaterialContext material_context = load_material_context(input, material);
-    //if (material_context.basecolor.a < material.alpha_cutoff)
-    //    discard;
-
-    return output;
+    if (CAN_DISINTEGRATE)
+    {
+        float alpha = bindless_textures[push_constants.noise_texture_index].Sample(bilinear_sampler, input.texcoord0).r;
+        alpha = srgb_to_linear(alpha.xxx).x;
+        if (alpha < push_constants.alpha_reference)
+            discard;
+    }
 }
