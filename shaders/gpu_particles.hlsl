@@ -25,10 +25,9 @@
 [[vk::binding(7)]] RWStructuredBuffer<GPUParticleSort> particle_sort;
 [[vk::binding(8)]] RWStructuredBuffer<AABBPositions> aabb_positions;
 [[vk::binding(9)]] RWStructuredBuffer<AccelerationStructureInstance> instances;
-[[vk::binding(10)]] RaytracingAccelerationStructure acceleration_structure;
-[[vk::binding(11)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
-[[vk::binding(12)]] SamplerState light_sampler;
-[[vk::binding(13)]] Texture2D light_texture;
+[[vk::binding(10)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
+[[vk::binding(11)]] SamplerState light_sampler;
+[[vk::binding(12)]] Texture2D light_texture;
 
 [[vk::push_constant]]
 GPUParticlePushConstants push_constants;

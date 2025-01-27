@@ -504,7 +504,6 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 		DescriptorInfo(sort_keyval_buffer[0].buffer),
 		DescriptorInfo(particle_aabbs.buffer),
 		DescriptorInfo(instances_buffer.buffer),
-		DescriptorInfo(tlas.acceleration_structure),
 		DescriptorInfo(indirect_draw_buffer.buffer),
 		DescriptorInfo(light_sampler),
 		DescriptorInfo(light_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
@@ -512,7 +511,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 
 	// Likewise for push constants
 	GPUParticlePushConstants push_constants{};
-	push_constants.delta_time = time > 5.0f ? dt : 0.0f;
+	push_constants.delta_time = dt;
 	push_constants.particles_to_spawn = one_time_emit ? particle_capacity :  (uint32_t)particles_to_spawn;
 	push_constants.particle_size = particle_size;
 	push_constants.particle_color = particle_color;
@@ -530,7 +529,7 @@ void GPUParticleSystem::simulate(VkCommandBuffer cmd, float dt, CameraState& cam
 
 	{ // Clear output state
 		vkCmdFillBuffer(cmd, particle_system_state[1].buffer, 0, VK_WHOLE_SIZE, 0);
-		vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+		//vkCmdFillBuffer(cmd, particle_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
 		//vkCmdFillBuffer(cmd, particle_aabbs.buffer, 0, VK_WHOLE_SIZE, 0);
 		//vkCmdFillBuffer(cmd, instances_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
@@ -768,7 +767,6 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 				DescriptorInfo(sort_keyval_buffer[0].buffer),
 				DescriptorInfo(particle_aabbs.buffer),
 				DescriptorInfo(instances_buffer.buffer),
-				DescriptorInfo(tlas.acceleration_structure)
 			};
 			vkCmdPushDescriptorSetWithTemplateKHR(cmd, 
 				render_pipeline_light->pipeline.descriptor_update_template, 
@@ -836,7 +834,6 @@ void GPUParticleSystem::render(VkCommandBuffer cmd, const Texture& depth_target)
 				DescriptorInfo(sort_keyval_buffer[0].buffer),
 				DescriptorInfo(particle_aabbs.buffer),
 				DescriptorInfo(instances_buffer.buffer),
-				DescriptorInfo(tlas.acceleration_structure),
 				DescriptorInfo(indirect_draw_buffer.buffer),
 				DescriptorInfo(light_sampler),
 				DescriptorInfo(light_render_target.view, VK_IMAGE_LAYOUT_GENERAL)
@@ -1159,7 +1156,7 @@ void GPUSurfaceFlowSystem::simulate(VkCommandBuffer cmd, float dt)
 
 	// Likewise for push constants
 	GPUParticlePushConstants push_constants{};
-	push_constants.delta_time = time > 5.0f ? dt : 0.0f;
+	push_constants.delta_time = dt;
 	push_constants.particles_to_spawn = one_time_emit ? particle_capacity : (uint32_t)particles_to_spawn;
 	push_constants.particle_size = particle_size * 0.1f;
 	push_constants.particle_color = particle_color;

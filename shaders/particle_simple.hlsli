@@ -6,7 +6,7 @@ bool particle_init(uint3 thread_id, inout GPUParticle p, float delta_time, uint4
 {
     float3 sphere_pos = emit_uniform_sphere(seed);
     float3 color = normalize(sphere_pos) * 0.5 + 0.5;
-    p.position = float3(0, 1, 2) + sphere_pos * 0.2;
+    p.position = float3(8, 1, 8) + sphere_pos * 0.2;
     //float3 dir = float3(sin(globals.time), 0.0f, cos(globals.time));
     float3 dir = float3(0, 1, 0);
     float3 random_dir = emit_uniform_sphere(seed);

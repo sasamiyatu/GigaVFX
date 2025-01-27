@@ -213,11 +213,13 @@ uint32_t* load_shader(ShaderSource& shader_source, VkShaderStageFlagBits shader_
 		shader_source.dependencies.insert(p);
 	}
 
+#if 0
 	LOG_DEBUG("Shader source (f: '%s', ep: '%s' has dependencies:", shader_source.filepath.c_str(), shader_source.entry_point.c_str());
 	for (const auto& d : shader_source.dependencies)
 	{
 		LOG_DEBUG("\t%s", d.string().c_str());
 	}
+#endif
 
 	std::filesystem::current_path(cwd);
 

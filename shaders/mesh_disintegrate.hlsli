@@ -22,7 +22,7 @@ bool particle_init(uint3 thread_id, inout GPUParticle p, float delta_time, uint4
 
     //p.velocity = dir * speed;
     p.position += uniform_random(seed).x * delta_time * p.velocity;
-    p.lifetime = p.max_lifetime = uniform_random(seed.y) * 0.5 + 0.5;
+    p.lifetime = p.max_lifetime = uniform_random(seed.y).x * 0.5 + 0.5;
     p.size = 0.005;
     //p.color = float4(uniform_random(seed).rgb, 1.0);
 

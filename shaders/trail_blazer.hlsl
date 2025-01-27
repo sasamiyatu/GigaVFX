@@ -25,7 +25,7 @@
 [[vk::push_constant]]
 TrailBlazerPushConstants push_constants;
 
-static const float3 sphere_center = float3(0, 2, 0);
+static const float3 sphere_center = float3(0, 1, -4);
 static const float sphere_radius = 0.5;
 
 float sdf_sphere(float3 p, float3 center, float radius)
@@ -94,7 +94,7 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
 
     GPUParticle p;
     p.velocity = float3(0, 0, 0);
-    p.lifetime = 0.2;
+    p.lifetime = 0.4;
     p.color = float4(uniform_random(seed).xyz, 0.1);
     p.size = 0.05;
 
@@ -119,12 +119,6 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
 
     if (thread_id.x == 0)
     {
-        // DispatchIndirectCommand child_emit_cmd;
-        // child_emit_cmd.x = indirect_dispatch[0].x;
-        // child_emit_cmd.y = push_constants.children_to_emit;
-        // child_emit_cmd.z = 1;
-        // children_emit_indirect_dispatch[0] = child_emit_cmd;
-
         indirect_draw[0].vertexCount = 1;
         indirect_draw[0].firstVertex = 0;
         indirect_draw[0].firstInstance = 0;
@@ -134,9 +128,9 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     if (p.lifetime > 0.0)
     {
         float3 n = sdf_normal(p.position);
-        float4 phi = gradient_noise_deriv(p.position);
+        float4 phi = gradient_noise_deriv(p.position + float3(0, 1, -4));
         float3 crossed_grad = cross(n, phi.yzw);
-        p.velocity = crossed_grad * 2.0;
+        p.velocity = crossed_grad * 1.0;
         p.position += p.velocity * push_constants.delta_time;
         p.lifetime -= push_constants.delta_time;
     }

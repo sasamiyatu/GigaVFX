@@ -38,8 +38,8 @@
 #include "imgui/imgui_impl_sdl2.h"
 #include "imgui/imgui_impl_vulkan.h"
 
-constexpr uint32_t WINDOW_WIDTH = 1280;
-constexpr uint32_t WINDOW_HEIGHT = 720;
+constexpr uint32_t INITIAL_WINDOW_WIDTH = 1280;
+constexpr uint32_t INITIAL_WINDOW_HEIGHT = 720;
 constexpr uint32_t MAX_BINDLESS_RESOURCES = 1024;
 constexpr VkFormat RENDER_TARGET_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr uint32_t DEPTH_TEXTURE_SIZE = 2048;
@@ -170,7 +170,7 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
-    ctx.init(WINDOW_WIDTH, WINDOW_HEIGHT);
+    ctx.init(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT);
 
     if (!sdf.init_texture(ctx))
     {
@@ -233,14 +233,14 @@ int main(int argc, char** argv)
     }
 
     Texture depth_texture{};
-    ctx.create_texture(depth_texture, WINDOW_WIDTH, WINDOW_HEIGHT, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, 
+    ctx.create_texture(depth_texture, ctx.window_width, ctx.window_height, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, 
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
     Texture shadowmap_texture{};
     ctx.create_texture(shadowmap_texture, DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE, 1u, VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1, 4);
 
     Texture hdr_render_target{};
-    ctx.create_texture(hdr_render_target, WINDOW_WIDTH, WINDOW_HEIGHT, 1, RENDER_TARGET_FORMAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+    ctx.create_texture(hdr_render_target, ctx.window_width, ctx.window_height, 1, RENDER_TARGET_FORMAT, VK_IMAGE_TYPE_2D, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
     
     { 
         VkCommandBuffer cmd = ctx.allocate_and_begin_command_buffer();
@@ -428,11 +428,11 @@ int main(int argc, char** argv)
     smoke_system.set_position(glm::vec3(0.0f, 0.0f, 0.0f));
     config_uis.push_back(&smoke_system);
 
-    GPUSurfaceFlowSystem flow2;
+ /*   GPUSurfaceFlowSystem flow2;
     flow2.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT, 30000,
         { "surface_flow.hlsl", "emit" }, { "surface_flow.hlsl", "simulate" }, &sdf, false);
     flow2.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
-    config_uis.push_back(&flow2);
+    config_uis.push_back(&flow2);*/
 
     TrailBlazerSystem trail_blazer;
     trail_blazer.sdf = &sdf;
@@ -464,7 +464,7 @@ int main(int argc, char** argv)
 
     {
         BufferDesc desc{};
-        desc.size = sizeof(glm::vec3) * WINDOW_WIDTH * WINDOW_HEIGHT;
+        desc.size = sizeof(glm::vec3) * ctx.window_width * ctx.window_height;
         desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
         mesh_disintegrate_spawn_positions = ctx.create_buffer(desc);
     }
@@ -530,7 +530,6 @@ int main(int argc, char** argv)
             {
                 if (strcmp(node->name, "smoke_origin") == 0)
                 {
-                    printf("%s\n", node->name);
                     glm::mat4 transform;
                     cgltf_node_transform_world(node, glm::value_ptr(transform));
                     smoke_dir = glm::normalize(glm::vec3(transform[2]));
@@ -548,6 +547,8 @@ int main(int argc, char** argv)
     smoke_system.smoke_origin = smoke_origin;
     smoke_system.smoke_dir = smoke_dir;
 
+    bool configurator_open = true;
+
     while (running)
     {
         Timer timer;
@@ -560,31 +561,6 @@ int main(int argc, char** argv)
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
-
-        { // Frame stats
-            ImGui::Begin("GPU Particle System");
-            ImGui::Text("GPU frame time: %f ms", ctx.smoothed_frame_time_ns * 1e-6f);
-            ImGui::Text("CPU frame time: %f ms", cpu_time_ms);
-            ImGui::Text("Particle simulate: %f us", smoke_system.performance_timings.simulate_total * 1e-3f);
-            ImGui::Text("Particle render: %f us", smoke_system.performance_timings.render_total * 1e-3f);
-            ImGui::Separator();
-            static int selected_system = 0;
-            if (ImGui::BeginCombo("Particle system", config_uis[selected_system]->get_display_name()))
-            {
-                for (int i = 0; i < config_uis.size(); ++i)
-                {
-                    if (ImGui::Selectable(config_uis[i]->get_display_name(), selected_system == i))
-                    {
-                        selected_system = i;
-                    }
-                }
-
-                ImGui::EndCombo();
-            }
-            config_uis[selected_system]->draw_config_ui();
-            //smoke_system.draw_config_ui();
-            ImGui::End();
-        }
 
         SDL_Event e;
         while (SDL_PollEvent(&e))
@@ -610,6 +586,9 @@ int main(int argc, char** argv)
                 case SDL_SCANCODE_F10:
                     show_imgui_demo = !show_imgui_demo;
                     break;
+                case SDL_SCANCODE_F11:
+                    configurator_open = !configurator_open;
+                    break;
                 default:
                     break;
                 }
@@ -633,22 +612,34 @@ int main(int argc, char** argv)
             }
         }
 
-        Input::update();
-        if (Input::get_key_pressed(SDL_SCANCODE_F1))
-        {
-            texture_catalog_open = !texture_catalog_open;
+        if (configurator_open)
+        { // Configurator window
+            ImGui::Begin("GPU Particle System", &configurator_open);
+            ImGui::Text("GPU frame time: %f ms", ctx.smoothed_frame_time_ns * 1e-6f);
+            ImGui::Text("CPU frame time: %f ms", cpu_time_ms);
+            ImGui::Separator();
+            static int selected_system = 0;
+            if (ImGui::BeginCombo("Particle system", config_uis[selected_system]->get_display_name()))
+            {
+                for (int i = 0; i < config_uis.size(); ++i)
+                {
+                    if (ImGui::Selectable(config_uis[i]->get_display_name(), selected_system == i))
+                    {
+                        selected_system = i;
+                    }
+                }
+
+                ImGui::EndCombo();
+            }
+            config_uis[selected_system]->draw_config_ui();
+            ImGui::End();
         }
 
-        if (texture_catalog_open)
-        {
-            //texture_catalog.draw_ui(&texture_catalog_open);
-        }
+        Input::update();
+
 
         if (show_imgui_demo)
             ImGui::ShowDemoWindow(&show_imgui_demo);
-
-        //particle_system_manager.draw_ui();
-        //gpu_particle_system.draw_stats_overlay();
 
         movement_speed = std::max(movement_speed, 0.0f);
 
@@ -715,7 +706,7 @@ int main(int argc, char** argv)
                     {
                         MeshInstance& mi = mesh_draws.emplace_back();
                         mi.mesh_index = (uint32_t)cgltf_mesh_index(gltf_data, node->mesh);
-						if (node->name && strcmp(node->name, "dragon_mat") == 0)
+						if (node->name && strcmp(node->name, "disintegrate1") == 0)
 						{
 							mi.variant_index = 1;
 						}
@@ -745,7 +736,7 @@ int main(int argc, char** argv)
             ShaderGlobals globals{};
             globals.view = glm::lookAt(camera.position, camera.position + camera.forward, camera.up);
             globals.view_inverse = glm::inverse(globals.view);
-            globals.projection = glm::perspective(camera.fov, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, camera.znear, camera.zfar);
+            globals.projection = glm::perspective(camera.fov, (float)ctx.window_width / (float)ctx.window_height, camera.znear, camera.zfar);
             globals.projection_inverse = glm::inverse(globals.projection);
             globals.viewprojection = globals.projection * globals.view;
             globals.viewprojection_inverse = glm::inverse(globals.viewprojection);
@@ -765,7 +756,7 @@ int main(int argc, char** argv)
             {
                 float near_plane = std::max(distance_thresholds[i], 0.01f);
                 float far_plane = i < 3 ? distance_thresholds[i + 1] : max_distance;
-                glm::mat4 proj = glm::perspective(camera.fov, (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, near_plane, far_plane);
+                glm::mat4 proj = glm::perspective(camera.fov, (float)ctx.window_width / (float)ctx.window_height, near_plane, far_plane);
                 Sphere frustum_bounding_sphere = get_frustum_bounding_sphere(proj);
                 float r = frustum_bounding_sphere.radius;
                 glm::mat4 shadow_proj = glm::ortho(-r, r, -r, r, 0.1f, 2.0f * r);
@@ -809,7 +800,7 @@ int main(int argc, char** argv)
         VkHelpers::end_label(command_buffer);
 
         smoke_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
-        flow2.simulate(command_buffer, (float)delta_time);
+        //flow2.simulate(command_buffer, (float)delta_time);
         trail_blazer.simulate(command_buffer, (float)delta_time);
 
 		particle_manager.update_systems(command_buffer, (float)delta_time);
@@ -852,8 +843,8 @@ int main(int argc, char** argv)
             
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, procedural_skybox_pipeline->pipeline.pipeline);
 
-            uint32_t dispatch_x = get_golden_dispatch_size(WINDOW_WIDTH);
-            uint32_t dispatch_y = get_golden_dispatch_size(WINDOW_HEIGHT);
+            uint32_t dispatch_x = get_golden_dispatch_size(ctx.window_width);
+            uint32_t dispatch_y = get_golden_dispatch_size(ctx.window_height);
             vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
 
             VkHelpers::end_label(command_buffer);
@@ -957,16 +948,16 @@ int main(int argc, char** argv)
             depth_info.clearValue.depthStencil.depth = 1.0f;
 
             VkRenderingInfo rendering_info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
-            rendering_info.renderArea = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+            rendering_info.renderArea = { {0, 0}, {(uint32_t)ctx.window_width, (uint32_t)ctx.window_height} };
             rendering_info.layerCount = 1;
             rendering_info.viewMask = 0;
             rendering_info.pDepthAttachment = &depth_info;
 
             vkCmdBeginRendering(command_buffer, &rendering_info);
 
-            VkRect2D scissor = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+            VkRect2D scissor = { {0, 0}, {(uint32_t)ctx.window_width, (uint32_t)ctx.window_height} };
             vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-            VkViewport viewport = { 0.0f, (float)WINDOW_HEIGHT, (float)WINDOW_WIDTH, -(float)WINDOW_HEIGHT, 0.0f, 1.0f };
+            VkViewport viewport = { 0.0f, (float)ctx.window_height, (float)ctx.window_width, -(float)ctx.window_height, 0.0f, 1.0f };
             vkCmdSetViewport(command_buffer, 0, 1, &viewport);
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_prepass->pipeline.pipeline);
@@ -1053,7 +1044,7 @@ int main(int argc, char** argv)
             depth_info.clearValue.depthStencil.depth = 1.0f;
 
             VkRenderingInfo rendering_info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
-            rendering_info.renderArea = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+            rendering_info.renderArea = { {0, 0}, {(uint32_t)ctx.window_width, (uint32_t)ctx.window_height} };
             rendering_info.layerCount = 1;
             rendering_info.viewMask = 0;
             rendering_info.colorAttachmentCount = 1;
@@ -1062,9 +1053,9 @@ int main(int argc, char** argv)
 
             vkCmdBeginRendering(command_buffer, &rendering_info);
 
-            VkRect2D scissor = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+            VkRect2D scissor = { {0, 0}, {ctx.window_width, ctx.window_height} };
             vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-            VkViewport viewport = { 0.0f, (float)WINDOW_HEIGHT, (float)WINDOW_WIDTH, -(float)WINDOW_HEIGHT, 0.0f, 1.0f };
+            VkViewport viewport = { 0.0f, (float)ctx.window_height, (float)ctx.window_width, -(float)ctx.window_height, 0.0f, 1.0f };
             vkCmdSetViewport(command_buffer, 0, 1, &viewport);
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline.pipeline);
@@ -1110,7 +1101,7 @@ int main(int argc, char** argv)
             VkHelpers::end_label(command_buffer);
         }
 
-        flow2.render(command_buffer);
+        //flow2.render(command_buffer);
         trail_blazer.render(command_buffer);
 		particle_manager.render_systems(command_buffer);
 
@@ -1166,14 +1157,14 @@ int main(int argc, char** argv)
             };
 
             PushConstantsTonemap pc{};
-            pc.size = glm::uvec2(WINDOW_WIDTH, WINDOW_HEIGHT);
+            pc.size = glm::uvec2(ctx.window_width, ctx.window_height);
 
             vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, tonemap_pipeline->pipeline.descriptor_update_template, tonemap_pipeline->pipeline.layout, 0, descriptor_info);
             vkCmdPushConstants(command_buffer, tonemap_pipeline->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, tonemap_pipeline->pipeline.pipeline);
 
-            uint32_t dispatch_x = get_golden_dispatch_size(WINDOW_WIDTH);
-            uint32_t dispatch_y = get_golden_dispatch_size(WINDOW_HEIGHT);
+            uint32_t dispatch_x = get_golden_dispatch_size(ctx.window_width);
+            uint32_t dispatch_y = get_golden_dispatch_size(ctx.window_height);
             vkCmdDispatch(command_buffer, dispatch_x, dispatch_y, 1);
 
             VkHelpers::end_label(command_buffer);
@@ -1197,7 +1188,7 @@ int main(int argc, char** argv)
             depth_info.clearValue.depthStencil.depth = 1.0f;
 
             VkRenderingInfo rendering_info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
-            rendering_info.renderArea = { {0, 0}, {WINDOW_WIDTH, WINDOW_HEIGHT} };
+            rendering_info.renderArea = { {0, 0}, {(uint32_t)ctx.window_width, (uint32_t)ctx.window_height} };
             rendering_info.layerCount = 1;
             rendering_info.viewMask = 0;
             rendering_info.colorAttachmentCount = 1;
@@ -1257,7 +1248,7 @@ int main(int argc, char** argv)
     }
     sdf.texture.destroy(ctx.device, ctx.allocator);
     smoke_system.destroy();
-    flow2.destroy();
+    //flow2.destroy();
     trail_blazer.destroy();
     particle_manager.destroy();
     depth_prepass_disintegrate->builder.destroy_resources(depth_prepass_disintegrate->pipeline);

@@ -15,10 +15,17 @@ constexpr uint32_t QUERY_COUNT = 256;
 
 void Context::init(int window_width, int window_height)
 {
+    if (!SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1"))
+    {
+        LOG_DEBUG("Failed to set Windows DPI scaling");
+    }
+
     SDL_Init(SDL_INIT_VIDEO);
 
-    window = SDL_CreateWindow("GigaVFX", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_VULKAN);
-    SDL_GetWindowSize(window, &this->window_width, &this->window_height);
+    uint32_t window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI;
+    window = SDL_CreateWindow("GigaVFX", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, window_flags);
+    SDL_GetWindowSizeInPixels(window, &this->window_width, &this->window_height);
+    LOG_INFO("Requested window of size: (%d, %d), got size in pixels: (%d, %d)", window_width, window_height, this->window_width, this->window_height);
 
     VK_CHECK(volkInitialize());
 
