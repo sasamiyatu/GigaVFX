@@ -392,18 +392,6 @@ int main(int argc, char** argv)
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
     ImGuiIO& io = ImGui::GetIO();
 
-    float slider[4] = {};
-
-    TextureCatalog texture_catalog;
-    texture_catalog.init(&ctx, "data/textures/");
-
-    ParticleRenderer particle_renderer;
-    particle_renderer.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT);
-    particle_renderer.texture_catalog = &texture_catalog;
-
-    ParticleSystemManager particle_system_manager;
-    particle_system_manager.init(&particle_renderer);
-
     std::vector<IConfigUI*> config_uis;
     constexpr uint32_t particle_capacity = 1048576;
     GPUParticleSystem smoke_system;
@@ -486,7 +474,6 @@ int main(int argc, char** argv)
 
     glm::vec3 sundir = glm::normalize(glm::vec3(1.0f));
     bool running = true;
-    bool texture_catalog_open = true;
     uint32_t frame_index = 0;
     bool show_imgui_demo = false;
     double cpu_time_ms = 0.0;
@@ -650,8 +637,6 @@ int main(int argc, char** argv)
 
         const float disintegrate_alpha_reference = glm::fract(elapsed_time * 0.1f);
 		const float disintegrate_prev_alpha_reference = glm::fract((elapsed_time - delta_time) * 0.1f);
-
-        particle_system_manager.update((float)delta_time);
 
         if (needs_hot_reload)
         {
@@ -1151,7 +1136,6 @@ int main(int argc, char** argv)
     vmaDestroyImage(ctx.allocator, depth_texture.image, depth_texture.allocation);
     vkDestroyImageView(ctx.device, depth_texture.view, nullptr);
     hdr_render_target.destroy(ctx.device, ctx.allocator);
-    texture_catalog.shutdown();
     for (auto& m : meshes)
     {
         vmaDestroyBuffer(ctx.allocator, m.indices.buffer, m.indices.allocation);
@@ -1184,7 +1168,6 @@ int main(int argc, char** argv)
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
     tonemap_pipeline->builder.destroy_resources(tonemap_pipeline->pipeline);
     test_pipeline->builder.destroy_resources(test_pipeline->pipeline);
-    particle_renderer.shutdown();
 
     ctx.shutdown();
 
