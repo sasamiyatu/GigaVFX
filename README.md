@@ -29,7 +29,7 @@ Disintegration effect inspired by [God of War](https://gdcvault.com/play/1025973
 
 ### Trails
 
-Uses two particle systems where one acts as the parent and one as the child. The movement is simulated in the parent system using [divergence-free noise](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=7bb700941935fb37e14bbd3d39abfd5b8318b470) to generate a velocity field conforming to the surface of a sphere. The child system gets its dispatch size based on the number of the particles in the parent system and its own emission rate. Trails are formed by the child particle system.
+Uses two particle systems where one acts as the parent and one as the child. The movement is simulated in the parent system using [divergence-free noise](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=7bb700941935fb37e14bbd3d39abfd5b8318b470) to generate a velocity field conforming to the surface of a sphere. The child system gets its dispatch size based on the number of the particles in the parent system and its own emission rate. Trails are formed by lots of small particles emitted by the child particle system.
 
 ![Alt text](screenshots/trails.png?raw=true "Disintegrate effect")
 
