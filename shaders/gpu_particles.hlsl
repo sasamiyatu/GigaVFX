@@ -100,19 +100,15 @@ void cs_write_draw( uint3 thread_id : SV_DispatchThreadID )
     if (thread_id.x >= push_constants.num_slices) return;
 
     uint active_particles = particle_system_state_out[0].active_particle_count;
-    uint draw_count = push_constants.num_slices == 0 
-        ? active_particles
-        : (active_particles + push_constants.num_slices - 1) / push_constants.num_slices;
-
-    uint32_t total_draws = active_particles;
-    uint32_t draws_per_slice = (total_draws + push_constants.num_slices - 1) / push_constants.num_slices;
-    uint draws_left = max(0, int(total_draws) - int(draws_per_slice * thread_id.x));
+    int total_draws = active_particles;
+    float draws_per_slice = ceil(float(total_draws) / float(push_constants.num_slices));
+    uint draws_left = max(0, total_draws - draws_per_slice * thread_id.x);
 
     DrawIndirectCommand draw_cmd;
     draw_cmd.vertexCount = 1;
     draw_cmd.instanceCount = min(draws_left, draws_per_slice);
     draw_cmd.firstVertex = 0;
-    draw_cmd.firstInstance = draw_count * thread_id.x;
+    draw_cmd.firstInstance = draws_per_slice * thread_id.x;
 
     indirect_draw[thread_id.x] = draw_cmd;
 }

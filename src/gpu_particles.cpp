@@ -970,7 +970,7 @@ void GPUParticleSystem::draw_config_ui()
 	ImGui::SliderFloat("particle size", &particle_size, 0.001f, 1.0f);
 	ImGui::SliderFloat("particle lifetime", &particle_lifetime, 0.0f, 20.0f);
 	ImGui::SliderFloat("particle alpha", &particle_color.a, 0.01f, 1.0f);
-	ImGui::ColorEdit3("particle color", glm::value_ptr(particle_color));
+	//ImGui::ColorEdit3("particle color", glm::value_ptr(particle_color));
 	ImGui::SliderFloat("noise scale", &noise_scale, 0.0f, 10.0f);
 	ImGui::SliderFloat("noise time scale", &noise_time_scale, 0.0f, 10.0f);
 	ImGui::Checkbox("sort particles", &sort_particles);
