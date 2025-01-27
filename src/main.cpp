@@ -145,7 +145,6 @@ int main(int argc, char** argv)
     }
 
     const char* gltf_path = argv[1];
-    //const char* gltf_path = "D:/Projects/glTF-Sample-Models/2.0/Box/glTF/Box.gltf";
     cgltf_options opt{};
     cgltf_data* gltf_data = nullptr;
     cgltf_result res = cgltf_parse_file(&opt, gltf_path, &gltf_data);
@@ -163,20 +162,7 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
-    SDF sdf{};
-    if (!sdf_load_from_file(sdf, "data/dragon_small.sdf"))
-    {
-        LOG_ERROR("Failed to load SDF!");
-        exit(EXIT_FAILURE);
-    }
-
     ctx.init(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT);
-
-    if (!sdf.init_texture(ctx))
-    {
-        LOG_ERROR("Failed to initialize SDF texture!");
-        return(EXIT_FAILURE);
-    }
 
     init_imgui();
 
@@ -390,8 +376,6 @@ int main(int argc, char** argv)
     BufferDesc desc{};
     desc.size = sizeof(ShaderGlobals);
     desc.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    //desc.allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-    //Buffer globals_buffer = ctx.create_buffer(desc);
     GPUBuffer globals_buffer = ctx.create_gpu_buffer(desc);
 
     CameraState camera;
@@ -428,14 +412,7 @@ int main(int argc, char** argv)
     smoke_system.set_position(glm::vec3(0.0f, 0.0f, 0.0f));
     config_uis.push_back(&smoke_system);
 
- /*   GPUSurfaceFlowSystem flow2;
-    flow2.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT, 30000,
-        { "surface_flow.hlsl", "emit" }, { "surface_flow.hlsl", "simulate" }, &sdf, false);
-    flow2.set_position(glm::vec3(-2.0, 0.0f, 0.0f));
-    config_uis.push_back(&flow2);*/
-
     TrailBlazerSystem trail_blazer;
-    trail_blazer.sdf = &sdf;
     trail_blazer.init(&ctx, globals_buffer, RENDER_TARGET_FORMAT);
     config_uis.push_back(&trail_blazer);
 
@@ -493,15 +470,6 @@ int main(int argc, char** argv)
     builder.set_shader_filepath("test_acceleration_structure.hlsl", "test_acceleration_structure");
     ComputePipelineAsset* test_pipeline = new ComputePipelineAsset(builder);
     AssetCatalog::register_asset(test_pipeline);
-
-    // Test sdf
-    ComputePipelineAsset* sdf_test = nullptr;
-    {
-        ComputePipelineBuilder builder(ctx.device, true);
-        builder.set_shader_filepath("sdf_test.hlsl", "test_sdf");
-        sdf_test = new ComputePipelineAsset(builder);
-        AssetCatalog::register_asset(sdf_test);
-    }
 
     // Separate thread for checking need for hot reload
     std::thread hot_reload_watcher([]() {
@@ -800,7 +768,6 @@ int main(int argc, char** argv)
         VkHelpers::end_label(command_buffer);
 
         smoke_system.simulate(command_buffer, (float)delta_time, camera, shadow_views[1], shadow_projs[1]);
-        //flow2.simulate(command_buffer, (float)delta_time);
         trail_blazer.simulate(command_buffer, (float)delta_time);
 
 		particle_manager.update_systems(command_buffer, (float)delta_time);
@@ -1053,7 +1020,7 @@ int main(int argc, char** argv)
 
             vkCmdBeginRendering(command_buffer, &rendering_info);
 
-            VkRect2D scissor = { {0, 0}, {ctx.window_width, ctx.window_height} };
+            VkRect2D scissor = { {0, 0}, {(uint32_t)ctx.window_width, (uint32_t)ctx.window_height} };
             vkCmdSetScissor(command_buffer, 0, 1, &scissor);
             VkViewport viewport = { 0.0f, (float)ctx.window_height, (float)ctx.window_width, -(float)ctx.window_height, 0.0f, 1.0f };
             vkCmdSetViewport(command_buffer, 0, 1, &viewport);
@@ -1101,52 +1068,12 @@ int main(int argc, char** argv)
             VkHelpers::end_label(command_buffer);
         }
 
-        //flow2.render(command_buffer);
         trail_blazer.render(command_buffer);
 		particle_manager.render_systems(command_buffer);
 
         vkCmdEndRendering(command_buffer);
 
-#if 0
-        { // SDF test
-            VkHelpers::begin_label(command_buffer, "SDF test", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
-            DescriptorInfo desc_info[] = {
-                DescriptorInfo(globals_buffer),
-                DescriptorInfo(bilinear_sampler),
-                DescriptorInfo(sdf.texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
-                DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
-            };
-
-            SDFPushConstants pc{};
-            pc.grid_dims = sdf.dims;
-            pc.grid_spacing = sdf.grid_spacing;
-            pc.grid_origin = sdf.grid_origin;
-
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, sdf_test->pipeline.pipeline);
-            vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, sdf_test->pipeline.descriptor_update_template, sdf_test->pipeline.layout, 0, desc_info);
-            vkCmdPushConstants(command_buffer, sdf_test->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
-            vkCmdDispatch(command_buffer, (WINDOW_WIDTH + 7) / 8, (WINDOW_HEIGHT + 7) / 8, 1);
-
-            VkHelpers::full_barrier(command_buffer);
-
-            VkHelpers::end_label(command_buffer);
-        }
-#endif
-
         smoke_system.composite(command_buffer, hdr_render_target);
-
-#if 0
-        DescriptorInfo desc_info[] = {
-            DescriptorInfo(gpu_particle_system.tlas.acceleration_structure),
-            DescriptorInfo(globals_buffer.buffer),
-            DescriptorInfo(hdr_render_target.view, VK_IMAGE_LAYOUT_GENERAL),
-            DescriptorInfo(gpu_particle_system.particle_aabbs.buffer),
-        };
-
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, test_pipeline->pipeline.pipeline);
-        vkCmdPushDescriptorSetWithTemplateKHR(command_buffer, test_pipeline->pipeline.descriptor_update_template, test_pipeline->pipeline.layout, 0, desc_info);
-        vkCmdDispatch(command_buffer, (WINDOW_WIDTH + 7) / 8, (WINDOW_HEIGHT + 7) / 8, 1);
-#endif
 
         {
             VkHelpers::begin_label(command_buffer, "Tonemap", glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
@@ -1246,9 +1173,7 @@ int main(int argc, char** argv)
         vkDestroyImageView(ctx.device, t.view, nullptr);
         vmaDestroyImage(ctx.allocator, t.image, t.allocation);
     }
-    sdf.texture.destroy(ctx.device, ctx.allocator);
     smoke_system.destroy();
-    //flow2.destroy();
     trail_blazer.destroy();
     particle_manager.destroy();
     depth_prepass_disintegrate->builder.destroy_resources(depth_prepass_disintegrate->pipeline);
@@ -1259,7 +1184,6 @@ int main(int argc, char** argv)
     procedural_skybox_pipeline->builder.destroy_resources(procedural_skybox_pipeline->pipeline);
     tonemap_pipeline->builder.destroy_resources(tonemap_pipeline->pipeline);
     test_pipeline->builder.destroy_resources(test_pipeline->pipeline);
-    sdf_test->builder.destroy_resources(sdf_test->pipeline);
     particle_renderer.shutdown();
 
     ctx.shutdown();

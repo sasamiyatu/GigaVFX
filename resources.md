@@ -22,9 +22,3 @@ Mar. 2014.
 12. Xiao, Xiangyun, Shuai Zhang, and Xubo Yang, “**Real-Time High-Quality Surface Rendering for Large Scale Particle-Based Fluids**,” Symposium on Interactive 3D Graphics and Games, Mar. 2017.
 13. Skillman, Drew, and Pete Demoreuille, “**Rock Show VFX: Bringing Brütal Legend to Life**,” Game Developers Conference, Mar. 2010.
 14. Rockenbeck, Bill, “**The inFAMOUS: Second Son Particle System Architecture**,” Game Developers Conference, Mar. 2014.
-
-## Notes
-- Look into fluid simulation
-- Look into parsing expressions and evaluating bytecode (watch Javid's video)
-- Look into particle shading / rendering
-- Look at example particle effects in Unity / Unreal

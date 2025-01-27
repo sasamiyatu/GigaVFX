@@ -5,6 +5,7 @@ and all state related to particle systems is resident only on the GPU. Buffers a
 
 [Video demonstration](https://www.youtube.com/watch?v=AAf6r7EPoss)
 
+<!---[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/AAf6r7EPoss/0.jpg)](https://www.youtube.com/watch?v=AAf6r7EPoss)-->
 ![Alt text](screenshots/armadillo.png?raw=true "Burning armadillo")
 
 ## Particle systems

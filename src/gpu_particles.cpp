@@ -1433,15 +1433,15 @@ void TrailBlazerSystem::init(Context* ctx, VkBuffer globals_buffer, VkFormat ren
 	}
 
 	{
-		VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-		info.magFilter = VK_FILTER_LINEAR;
-		info.minFilter = VK_FILTER_LINEAR;
-		info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		info.maxLod = VK_LOD_CLAMP_NONE;
-		info.maxAnisotropy = 1;
-		VK_CHECK(vkCreateSampler(ctx->device, &info, nullptr, &sdf_sampler));
+		//VkSamplerCreateInfo info{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+		//info.magFilter = VK_FILTER_LINEAR;
+		//info.minFilter = VK_FILTER_LINEAR;
+		//info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		//info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		//info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		//info.maxLod = VK_LOD_CLAMP_NONE;
+		//info.maxAnisotropy = 1;
+		//VK_CHECK(vkCreateSampler(ctx->device, &info, nullptr, &sdf_sampler));
 	}
 }
 
@@ -1482,8 +1482,8 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 			DescriptorInfo(indirect_dispatch_buffer.buffer),
 			DescriptorInfo(indirect_draw_buffer.buffer),
 			DescriptorInfo(child_emit_indirect_dispatch_buffer),
-			DescriptorInfo(sdf->texture.view, sdf->texture.layout),
-			DescriptorInfo(sdf_sampler)
+			//DescriptorInfo(sdf->texture.view, sdf->texture.layout),
+			//DescriptorInfo(sdf_sampler)
 		};
 
 		// Likewise for push constants
@@ -1491,9 +1491,9 @@ void TrailBlazerSystem::simulate(VkCommandBuffer cmd, float dt)
 		push_constants.delta_time = dt;
 		push_constants.particles_to_spawn = (uint32_t)particles_to_spawn;
 		push_constants.particle_capacity = particle_capacity;
-		push_constants.sdf_dims = sdf->dims;
-		push_constants.sdf_origin = sdf->grid_origin;
-		push_constants.sdf_spacing = sdf->grid_spacing;
+		//push_constants.sdf_dims = sdf->dims;
+		//push_constants.sdf_origin = sdf->grid_origin;
+		//push_constants.sdf_spacing = sdf->grid_spacing;
 
 		DescriptorInfo child_descriptor_info[] = {
 			DescriptorInfo(shader_globals),
@@ -1642,7 +1642,7 @@ void TrailBlazerSystem::destroy()
 	child_draw_count_pipeline->builder.destroy_resources(child_draw_count_pipeline->pipeline);
 	child_simulate_pipeline->builder.destroy_resources(child_simulate_pipeline->pipeline);
 
-	vkDestroySampler(ctx->device, sdf_sampler, nullptr);
+	//vkDestroySampler(ctx->device, sdf_sampler, nullptr);
 	ctx->destroy_buffer(indirect_dispatch_buffer);
 	ctx->destroy_buffer(indirect_draw_buffer);
 	ctx->destroy_buffer(child_indirect_dispatch_buffer);

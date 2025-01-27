@@ -203,9 +203,6 @@ struct TrailBlazerSystem : IConfigUI
     struct ComputePipelineAsset* child_dispatch_size_pipeline = nullptr;
     struct ComputePipelineAsset* child_draw_count_pipeline = nullptr;
 
-    SDF* sdf;
-    VkSampler sdf_sampler;
-
     // Double buffered
     Buffer particle_buffer[2] = {};
     Buffer particle_system_state[2] = {};
