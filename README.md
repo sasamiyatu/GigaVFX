@@ -34,3 +34,22 @@ Uses two particle systems where one acts as the parent and one as the child. The
 
 ![Alt text](screenshots/trails.png?raw=true "Disintegrate effect")
 
+## Building and running
+
+Clone the project:
+``` 
+git clone --recursive https://github.com/sasamiyatu/GigaVFX.git
+cd GigaVFX
+```
+
+Build with CMake:
+```
+cmake -S . -B build
+cmake --build build
+```
+
+Run the test scene
+```
+build\Debug\gigavfx.exe data\test.glb
+```
+
