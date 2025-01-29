@@ -283,6 +283,11 @@ struct ParticleManagerSimple
     VkBuffer globals_buffer;
 	VkFormat render_target_format;
     bool initialized = false;
+    ComputePipelineAsset* write_indirect_dispatch = nullptr;
+    static constexpr uint32_t MAX_SYSTEMS = 1024;
+    Buffer system_states_buffer[2]; // Double buffered
+    Buffer indirect_dispatch_buffer;
+    bool first_frame = true;
 
 	void init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format);
     ParticleSystemSimple* add_system(const ParticleSystemSimple::Config& cfg);

@@ -80,7 +80,6 @@ add_executable(gigavfx
 
 target_include_directories(gigavfx PUBLIC ${Vulkan_INCLUDE_DIRS})
 
-
 target_link_libraries(gigavfx PUBLIC SDL2::SDL2 Vulkan::dxc_lib Vulkan::volk vk-radix-sort)
 set_target_properties(
     gigavfx

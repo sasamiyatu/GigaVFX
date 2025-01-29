@@ -2044,6 +2044,19 @@ void ParticleManagerSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat
 	this->ctx = ctx;
 	this->globals_buffer = globals_buffer;
 	this->render_target_format = render_target_format;
+
+	write_indirect_dispatch = create_pipeline(ctx, "particle_helpers.hlsl", "write_dispatch");
+
+	{
+		BufferDesc desc{};
+		desc.size = sizeof(GPUParticleSystemState) * MAX_SYSTEMS;
+		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		for (int i = 0; i < 2; ++i)
+			system_states_buffer[i] = ctx->create_buffer(desc);
+
+		desc.size = sizeof(DispatchIndirectCommand) * MAX_SYSTEMS;
+		indirect_dispatch_buffer = ctx->create_buffer(desc);
+	}
 }
 
 ParticleSystemSimple* ParticleManagerSimple::add_system(const ParticleSystemSimple::Config& cfg)
@@ -2057,6 +2070,22 @@ ParticleSystemSimple* ParticleManagerSimple::add_system(const ParticleSystemSimp
 
 void ParticleManagerSimple::update_systems(VkCommandBuffer cmd, float dt)
 {
+	if (first_frame)
+	{
+		vkCmdFillBuffer(cmd, system_states_buffer[0].buffer, 0, VK_WHOLE_SIZE, 0);
+
+		first_frame = false;
+	}
+
+	// Clear output state
+	vkCmdFillBuffer(cmd, system_states_buffer[1].buffer, 0, VK_WHOLE_SIZE, 0);
+	vkCmdFillBuffer(cmd, indirect_dispatch_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+
+	VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT,
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+
+
 	VkHelpers::begin_label(cmd, "Particle Manager pre update", Colors::APRICOT);
 	for (ParticleSystemSimple* system : systems) system->pre_update(cmd, dt);
 
@@ -2079,6 +2108,8 @@ void ParticleManagerSimple::update_systems(VkCommandBuffer cmd, float dt)
 	VkHelpers::end_label(cmd);
 
 	for (ParticleSystemSimple* system : systems) system->post_update(cmd, dt);
+
+	std::swap(system_states_buffer[0], system_states_buffer[1]);
 }
 
 void ParticleManagerSimple::render_systems(VkCommandBuffer cmd)
@@ -2091,4 +2122,8 @@ void ParticleManagerSimple::render_systems(VkCommandBuffer cmd)
 void ParticleManagerSimple::destroy()
 {
 	for (ParticleSystemSimple* system : systems) system->destroy();
+	ctx->destroy_buffer(indirect_dispatch_buffer);
+	for (int i = 0; i < 2; ++i)
+		ctx->destroy_buffer(system_states_buffer[i]);
+	write_indirect_dispatch->builder.destroy_resources(write_indirect_dispatch->pipeline);
 }
