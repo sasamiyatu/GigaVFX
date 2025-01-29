@@ -219,4 +219,5 @@ struct ParticleTemplatePushConstants
     uint particles_to_spawn;
     uint particle_capacity;
     float delta_time;
+    uint32_t system_index;
 };

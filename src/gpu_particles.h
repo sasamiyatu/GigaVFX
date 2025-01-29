@@ -4,6 +4,7 @@
 #include "radix_sort.h"
 #include "sdf.h"
 #include "pipeline.h"
+#include "../shaders/shared.h"
 
 struct AccelerationStructure
 {
@@ -234,13 +235,10 @@ struct ParticleSystemSimple : IConfigUI
 
     void init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format, const Config& cfg);
 
-    void pre_update(VkCommandBuffer cmd, float dt);
+    void pre_update(VkCommandBuffer cmd, float dt, const GPUBuffer& curr_state, const GPUBuffer& next_state, uint32_t system_index);
     void emit(VkCommandBuffer cmd, float dt);
-    void update(VkCommandBuffer cmd, float dt);
+    void update(VkCommandBuffer cmd, float dt, VkBuffer indirect_dispatch_buffer, uint32_t buffer_offset);
     void post_update(VkCommandBuffer cmd, float dt);
-
-    // Calls emit + update with added barriers
-    void simulate(VkCommandBuffer cmd, float dt);
 
     void render(VkCommandBuffer cmd);
     void destroy();
@@ -267,13 +265,12 @@ struct ParticleSystemSimple : IConfigUI
 
     // Double buffered
     Buffer particle_buffer[2] = {};
-    GPUBuffer particle_system_state[2] = {};
 
     GPUBuffer emit_indirect_dispatch_buffer = {};
-    Buffer indirect_dispatch_buffer = {};
     Buffer indirect_draw_buffer = {};
 
     std::vector<DescriptorInfo> descriptors;
+    ParticleTemplatePushConstants push_constants;
 };
 
 struct ParticleManagerSimple
@@ -285,7 +282,7 @@ struct ParticleManagerSimple
     bool initialized = false;
     ComputePipelineAsset* write_indirect_dispatch = nullptr;
     static constexpr uint32_t MAX_SYSTEMS = 1024;
-    Buffer system_states_buffer[2]; // Double buffered
+    GPUBuffer system_states_buffer[2]; // Double buffered
     Buffer indirect_dispatch_buffer;
     bool first_frame = true;
 

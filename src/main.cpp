@@ -435,6 +435,7 @@ int main(int argc, char** argv)
     }
 
 	ParticleSystemSimple* disintegrator_system = nullptr;
+    uint32_t disintegrator_system_index = 0;
     {
         ParticleSystemSimple::Config config{};
         config.emit_and_simulate_file = "mesh_disintegrate.hlsli";
@@ -446,6 +447,7 @@ int main(int argc, char** argv)
             DescriptorInfo(depth_texture.view, VK_IMAGE_LAYOUT_GENERAL),
             DescriptorInfo(point_sampler)
         };
+        disintegrator_system_index = particle_manager.systems.size();
         disintegrator_system = particle_manager.add_system(config);
     }
 
@@ -917,7 +919,10 @@ int main(int argc, char** argv)
             DescriptorInfo descriptor_info[] = {
                 DescriptorInfo(globals_buffer),
                 DescriptorInfo(bilinear_sampler),
-                DescriptorInfo(disintegrator_system->particle_system_state[0]),
+                DescriptorInfo(particle_manager.system_states_buffer[0],
+                    sizeof(GPUParticleSystemState) * disintegrator_system_index,
+                    sizeof(GPUParticleSystemState)
+                ),
                 DescriptorInfo(disintegrator_system->emit_indirect_dispatch_buffer),
 				DescriptorInfo(mesh_disintegrate_spawn_positions.buffer),
             };

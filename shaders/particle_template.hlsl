@@ -14,8 +14,7 @@
 [[vk::binding(3)]] RWStructuredBuffer<GPUParticle> particles_compact_out;
 [[vk::binding(4)]] RWStructuredBuffer<GPUParticleSystemState> particle_system_state_out;
 
-[[vk::binding(5)]] RWStructuredBuffer<DispatchIndirectCommand> indirect_dispatch;
-[[vk::binding(6)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
+[[vk::binding(5)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
 
 [[vk::push_constant]]
 ParticleTemplatePushConstants push_constants;
@@ -27,16 +26,10 @@ bool particle_update(uint3 thread_id, inout GPUParticle p, float delta_time, uin
 [numthreads(64, 1, 1)]
 void emit( uint3 thread_id : SV_DispatchThreadID )
 {
-    if (thread_id.x >= particle_system_state[0].particles_to_emit)
+    if (thread_id.x >= particle_system_state[push_constants.system_index].particles_to_emit)
         return;
 
-    if (thread_id.x == 0)
-    {
-        indirect_dispatch[0].y = 1;
-        indirect_dispatch[0].z = 1;
-    }
-
-    if (particle_system_state[0].active_particle_count >= push_constants.particle_capacity)
+    if (particle_system_state[push_constants.system_index].active_particle_count >= push_constants.particle_capacity)
     {
         printf("Full capacity! Can't emit");
         return;
@@ -54,9 +47,7 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
 
     if (WaveIsFirstLane())
     {
-        InterlockedAdd(particle_system_state[0].active_particle_count, lane_spawn_count, global_particle_index);
-        uint size = (lane_spawn_count + global_particle_index + 63) / 64;
-        InterlockedMax(indirect_dispatch[0].x, size);
+        InterlockedAdd(particle_system_state[push_constants.system_index].active_particle_count, lane_spawn_count, global_particle_index);
     }
 
     global_particle_index = WaveReadLaneFirst(global_particle_index);
@@ -67,7 +58,7 @@ void emit( uint3 thread_id : SV_DispatchThreadID )
 [numthreads(64, 1, 1)]
 void simulate( uint3 thread_id : SV_DispatchThreadID )
 {
-    if (thread_id.x >= particle_system_state[0].active_particle_count)
+    if (thread_id.x >= particle_system_state[push_constants.system_index].active_particle_count)
         return;
 
     if (thread_id.x == 0)
@@ -89,7 +80,7 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     uint global_particle_index;
     if (WaveIsFirstLane())
     {
-        InterlockedAdd(particle_system_state_out[0].active_particle_count, alive_count, global_particle_index);
+        InterlockedAdd(particle_system_state_out[push_constants.system_index].active_particle_count, alive_count, global_particle_index);
         InterlockedAdd(indirect_draw[0].instanceCount, alive_count);
     }
 

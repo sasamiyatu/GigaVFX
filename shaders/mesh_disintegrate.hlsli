@@ -3,9 +3,9 @@
 #include "noise.hlsli"
 #include "bitangent_noise.hlsli"
 
-[[vk::binding(7)]] StructuredBuffer<float3> spawn_pos;
-[[vk::binding(8)]] Texture2D depth_texture;
-[[vk::binding(9)]] SamplerState depth_sampler;
+[[vk::binding(6)]] StructuredBuffer<float3> spawn_pos;
+[[vk::binding(7)]] Texture2D depth_texture;
+[[vk::binding(8)]] SamplerState depth_sampler;
 
 bool particle_init(uint3 thread_id, inout GPUParticle p, float delta_time, uint4 seed)
 {
@@ -20,10 +20,12 @@ bool particle_init(uint3 thread_id, inout GPUParticle p, float delta_time, uint4
 
     dir = lerp(random_dir, dir, 0.85);
 
+
     //p.velocity = dir * speed;
     p.position += uniform_random(seed).x * delta_time * p.velocity;
     p.lifetime = p.max_lifetime = uniform_random(seed.y).x * 0.5 + 0.5;
     p.size = 0.005;
+
     //p.color = float4(uniform_random(seed).rgb, 1.0);
 
     return true;
