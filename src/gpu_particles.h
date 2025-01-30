@@ -240,7 +240,7 @@ struct ParticleSystemSimple : IConfigUI
     void update(VkCommandBuffer cmd, float dt, VkBuffer indirect_dispatch_buffer, uint32_t buffer_offset);
     void post_update(VkCommandBuffer cmd, float dt);
 
-    void render(VkCommandBuffer cmd);
+    void render(VkCommandBuffer cmd, VkBuffer indirect_draw_buffer, size_t offset);
     void destroy();
 
     // ConfigUI
@@ -267,7 +267,6 @@ struct ParticleSystemSimple : IConfigUI
     Buffer particle_buffer[2] = {};
 
     GPUBuffer emit_indirect_dispatch_buffer = {};
-    Buffer indirect_draw_buffer = {};
 
     std::vector<DescriptorInfo> descriptors;
     ParticleTemplatePushConstants push_constants;
@@ -281,9 +280,11 @@ struct ParticleManagerSimple
 	VkFormat render_target_format;
     bool initialized = false;
     ComputePipelineAsset* write_indirect_dispatch = nullptr;
+    ComputePipelineAsset* write_indirect_draw = nullptr;
     static constexpr uint32_t MAX_SYSTEMS = 1024;
     GPUBuffer system_states_buffer[2]; // Double buffered
     Buffer indirect_dispatch_buffer;
+    Buffer indirect_draw_buffer;
     bool first_frame = true;
 
 	void init(Context* ctx, VkBuffer globals_buffer, VkFormat render_target_format);

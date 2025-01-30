@@ -14,8 +14,6 @@
 [[vk::binding(3)]] RWStructuredBuffer<GPUParticle> particles_compact_out;
 [[vk::binding(4)]] RWStructuredBuffer<GPUParticleSystemState> particle_system_state_out;
 
-[[vk::binding(5)]] RWStructuredBuffer<DrawIndirectCommand> indirect_draw;
-
 [[vk::push_constant]]
 ParticleTemplatePushConstants push_constants;
 
@@ -61,13 +59,6 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     if (thread_id.x >= particle_system_state[push_constants.system_index].active_particle_count)
         return;
 
-    if (thread_id.x == 0)
-    {
-        indirect_draw[0].vertexCount = 1;
-        indirect_draw[0].firstVertex = 0;
-        indirect_draw[0].firstInstance = 0;
-    }
-
     GPUParticle p = particles[thread_id.x];
     uint4 seed = uint4(thread_id.xy, globals.frame_index, 1337);
     bool alive = particle_update(thread_id, p, push_constants.delta_time, seed);
@@ -81,7 +72,6 @@ void simulate( uint3 thread_id : SV_DispatchThreadID )
     if (WaveIsFirstLane())
     {
         InterlockedAdd(particle_system_state_out[push_constants.system_index].active_particle_count, alive_count, global_particle_index);
-        InterlockedAdd(indirect_draw[0].instanceCount, alive_count);
     }
 
     global_particle_index = WaveReadLaneFirst(global_particle_index);

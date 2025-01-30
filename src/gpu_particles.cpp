@@ -1681,7 +1681,7 @@ void ParticleSystemSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat 
 	config = cfg;
 	emit_indirect_dispatch_handled_externally = cfg.emit_indirect_dispatch_handled_externally;
 
-	constexpr uint32_t default_descriptor_count = 6;
+	constexpr uint32_t default_descriptor_count = 5;
 	descriptors.resize(default_descriptor_count + cfg.additional_descriptors.size());
 	for (uint32_t i = 0; i < cfg.additional_descriptors.size(); ++i)
 	{
@@ -1747,14 +1747,6 @@ void ParticleSystemSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat 
 		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 		emit_indirect_dispatch_buffer = ctx->create_gpu_buffer(desc);
 	}
-
-	{ // indirect draw buffer
-		BufferDesc desc{};
-		desc.size = sizeof(DrawIndirectCommand) * MAX_SLICES;
-		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-		indirect_draw_buffer = ctx->create_buffer(desc);
-	}
 }
 
 void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt, const GPUBuffer& curr_state, const GPUBuffer& next_state, uint32_t system_index)
@@ -1801,7 +1793,6 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt, const GPUBu
 			DescriptorInfo(curr_state),
 			DescriptorInfo(particle_buffer[1].buffer),
 			DescriptorInfo(next_state),
-			DescriptorInfo(indirect_draw_buffer.buffer),
 		};
 
 		memcpy(descriptors.data(), descriptor_info, sizeof(descriptor_info));
@@ -1816,8 +1807,8 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt, const GPUBu
 
 		{ // Clear output state
 			VkHelpers::begin_label(cmd, "Clear buffers", Colors::BEIGE);
-			vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
+			// TODO: Don't use indirect emit when its not handled externally
 			if (!emit_indirect_dispatch_handled_externally)
 			{
 				{
@@ -1878,7 +1869,7 @@ void ParticleSystemSimple::post_update(VkCommandBuffer cmd, float dt)
 	std::swap(particle_buffer[0], particle_buffer[1]);
 }
 
-void ParticleSystemSimple::render(VkCommandBuffer cmd)
+void ParticleSystemSimple::render(VkCommandBuffer cmd, VkBuffer indirect_draw_buffer, size_t offset)
 {
 	VkHelpers::begin_label(cmd, "Particle template render", glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, render_pipeline->pipeline.pipeline);
@@ -1889,7 +1880,7 @@ void ParticleSystemSimple::render(VkCommandBuffer cmd)
 	};
 
 	vkCmdPushDescriptorSetWithTemplateKHR(cmd, render_pipeline->pipeline.descriptor_update_template, render_pipeline->pipeline.layout, 0, descriptor_info);
-	vkCmdDrawIndirect(cmd, indirect_draw_buffer.buffer, 0, 1, sizeof(DrawIndirectCommand));
+	vkCmdDrawIndirect(cmd, indirect_draw_buffer, offset, 1, sizeof(DrawIndirectCommand));
 
 	VkHelpers::end_label(cmd);
 }
@@ -1900,7 +1891,6 @@ void ParticleSystemSimple::destroy()
 	particle_emit_pipeline->builder.destroy_resources(particle_emit_pipeline->pipeline);
 	particle_simulate_pipeline->builder.destroy_resources(particle_simulate_pipeline->pipeline);
 
-	ctx->destroy_buffer(indirect_draw_buffer);
 	ctx->destroy_buffer(emit_indirect_dispatch_buffer);
 	for (int i = 0; i < 2; ++i)
 	{
@@ -1927,7 +1917,8 @@ void ParticleManagerSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat
 	this->globals_buffer = globals_buffer;
 	this->render_target_format = render_target_format;
 
-	write_indirect_dispatch = create_pipeline(ctx, "particle_helpers.hlsl", "write_dispatch");
+	write_indirect_dispatch = create_pipeline(ctx, "particle_indirect_dispatch.hlsl", "write_dispatch");
+	write_indirect_draw = create_pipeline(ctx, "particle_indirect_draw.hlsl", "write_draw");
 
 	{
 		BufferDesc desc{};
@@ -1939,6 +1930,9 @@ void ParticleManagerSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat
 		desc.size = sizeof(DispatchIndirectCommand) * MAX_SYSTEMS;
 		desc.usage_flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 		indirect_dispatch_buffer = ctx->create_buffer(desc);
+
+		desc.size = sizeof(DrawIndirectCommand) * MAX_SYSTEMS;
+		indirect_draw_buffer = ctx->create_buffer(desc);
 	}
 }
 
@@ -1963,6 +1957,7 @@ void ParticleManagerSimple::update_systems(VkCommandBuffer cmd, float dt)
 	// Clear output state
 	vkCmdFillBuffer(cmd, system_states_buffer[1], 0, VK_WHOLE_SIZE, 0);
 	vkCmdFillBuffer(cmd, indirect_dispatch_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+	vkCmdFillBuffer(cmd, indirect_draw_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
 	VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT,
@@ -2009,6 +2004,26 @@ void ParticleManagerSimple::update_systems(VkCommandBuffer cmd, float dt)
 	compute_barrier_simple(cmd);
 	VkHelpers::end_label(cmd);
 
+	{
+		VkHelpers::begin_label(cmd, "Particle Manager write indirect draw", Colors::BLUE);
+		DescriptorInfo descriptor_info[] = {
+			DescriptorInfo(system_states_buffer[1]),
+			DescriptorInfo(indirect_draw_buffer.buffer),
+		};
+
+		uint32_t system_count = (uint32_t)systems.size();
+
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, write_indirect_draw->pipeline.pipeline);
+		vkCmdPushDescriptorSetWithTemplateKHR(cmd, write_indirect_draw->pipeline.descriptor_update_template,
+			write_indirect_draw->pipeline.layout, 0, descriptor_info);
+		vkCmdPushConstants(cmd, write_indirect_draw->pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &system_count);
+		vkCmdDispatch(cmd, get_dispatch_size(system_count), 1, 1);
+
+		VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+			VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+		VkHelpers::end_label(cmd);
+	}
+
 	for (ParticleSystemSimple* system : systems) system->post_update(cmd, dt);
 
 	std::swap(system_states_buffer[0], system_states_buffer[1]);
@@ -2017,7 +2032,7 @@ void ParticleManagerSimple::update_systems(VkCommandBuffer cmd, float dt)
 void ParticleManagerSimple::render_systems(VkCommandBuffer cmd)
 {
 	VkHelpers::begin_label(cmd, "Particle Manager render", Colors::BEIGE);
-	for (ParticleSystemSimple* system : systems) system->render(cmd);
+	for (size_t i = 0; i < systems.size(); ++i) systems[i]->render(cmd, indirect_draw_buffer.buffer, sizeof(DrawIndirectCommand) * i);
 	VkHelpers::end_label(cmd);
 }
 
@@ -2027,5 +2042,7 @@ void ParticleManagerSimple::destroy()
 	ctx->destroy_buffer(indirect_dispatch_buffer);
 	for (int i = 0; i < 2; ++i)
 		ctx->destroy_buffer(system_states_buffer[i]);
+	ctx->destroy_buffer(indirect_draw_buffer);
 	write_indirect_dispatch->builder.destroy_resources(write_indirect_dispatch->pipeline);
+	write_indirect_draw->builder.destroy_resources(write_indirect_draw->pipeline);
 }

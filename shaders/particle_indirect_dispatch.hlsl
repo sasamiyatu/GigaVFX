@@ -1,6 +1,7 @@
 #include "shared.h"
 
 [[vk::binding(0)]] StructuredBuffer<GPUParticleSystemState> system_states;
+
 [[vk::binding(1)]] RWStructuredBuffer<DispatchIndirectCommand> indirect_dispatch;
 
 struct PushConstants
@@ -25,3 +26,4 @@ void write_dispatch( uint3 thread_id : SV_DispatchThreadID )
 
     indirect_dispatch[thread_id.x] = command;
 }
+
