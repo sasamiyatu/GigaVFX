@@ -761,7 +761,7 @@ int main(int argc, char** argv)
 
         {
             // Clear dispatch count because depth prepass will write it
-            vkCmdFillBuffer(command_buffer, disintegrator_system->emit_indirect_dispatch_buffer, 0, sizeof(uint32_t), 0);
+            vkCmdFillBuffer(command_buffer, disintegrator_system->emit_indirect_dispatch_buffer.buffer, 0, sizeof(uint32_t), 0);
 			VkHelpers::memory_barrier(command_buffer,
 				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 				VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
@@ -923,7 +923,7 @@ int main(int argc, char** argv)
                     sizeof(GPUParticleSystemState) * disintegrator_system_index,
                     sizeof(GPUParticleSystemState)
                 ),
-                DescriptorInfo(disintegrator_system->emit_indirect_dispatch_buffer),
+                DescriptorInfo(disintegrator_system->emit_indirect_dispatch_buffer.buffer),
 				DescriptorInfo(mesh_disintegrate_spawn_positions.buffer),
             };
 

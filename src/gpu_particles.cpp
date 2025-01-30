@@ -1745,7 +1745,7 @@ void ParticleSystemSimple::init(Context* ctx, VkBuffer globals_buffer, VkFormat 
 		BufferDesc desc{};
 		desc.size = sizeof(DispatchIndirectCommand);
 		desc.usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-		emit_indirect_dispatch_buffer = ctx->create_gpu_buffer(desc);
+		emit_indirect_dispatch_buffer = ctx->create_buffer(desc);
 	}
 }
 
@@ -1762,19 +1762,7 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt, const GPUBu
 			vkCmdFillBuffer(cmd, particle_buffer[i].buffer, 0, VK_WHOLE_SIZE, 0);
 		}
 
-		{
-			// Initialize y and z so that shaders only have to worry about writing x
-			DispatchIndirectCommand dispatch{};
-			dispatch.x = 0;
-			dispatch.y = 1;
-			dispatch.z = 1;
-
-			void* mapped = nullptr;
-			ctx->map_buffer(emit_indirect_dispatch_buffer, &mapped);
-			memcpy(mapped, &dispatch, sizeof(dispatch));
-			ctx->unmap_buffer(emit_indirect_dispatch_buffer);
-			ctx->upload_buffer(emit_indirect_dispatch_buffer, cmd);
-		}
+		vkCmdFillBuffer(cmd, emit_indirect_dispatch_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
 
 		VkHelpers::memory_barrier(cmd,
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -1804,6 +1792,7 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt, const GPUBu
 		push_constants.particle_capacity = config.particle_capacity;
 		push_constants.delta_time = dt;
 		push_constants.system_index = system_index;
+		push_constants.externally_dispatched = emit_indirect_dispatch_handled_externally;
 
 		{ // Clear output state
 			VkHelpers::begin_label(cmd, "Clear buffers", Colors::BEIGE);
@@ -1811,20 +1800,6 @@ void ParticleSystemSimple::pre_update(VkCommandBuffer cmd, float dt, const GPUBu
 			// TODO: Don't use indirect emit when its not handled externally
 			if (!emit_indirect_dispatch_handled_externally)
 			{
-				{
-					// Write it ourselves
-					DispatchIndirectCommand dispatch{};
-
-					dispatch.x = get_dispatch_size(push_constants.particles_to_spawn);
-					dispatch.y = 1;
-					dispatch.z = 1;
-
-					void* mapped;
-					ctx->map_buffer(emit_indirect_dispatch_buffer, &mapped);
-					memcpy(mapped, &dispatch, sizeof(dispatch));
-					ctx->unmap_buffer(emit_indirect_dispatch_buffer);
-					ctx->upload_buffer(emit_indirect_dispatch_buffer, cmd);
-				}
 				{
 					uint32_t emit_count = push_constants.particles_to_spawn;
 					GPUParticleSystemState state{};
@@ -1848,7 +1823,10 @@ void ParticleSystemSimple::emit(VkCommandBuffer cmd, float dt)
 	// Likewise for push constants
 	VkHelpers::begin_label(cmd, "Emit", Colors::CYAN);
 	//dispatch(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptor_info, get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
-	dispatch_indirect(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptors.data(), emit_indirect_dispatch_buffer, 0);
+	if (emit_indirect_dispatch_handled_externally)
+		dispatch_indirect(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptors.data(), emit_indirect_dispatch_buffer.buffer, 0);
+	else
+		dispatch(cmd, particle_emit_pipeline, &push_constants, sizeof(push_constants), descriptors.data(), get_dispatch_size(push_constants.particles_to_spawn), 1, 1);
 	//VkHelpers::memory_barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
 	//	VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
 	VkHelpers::end_label(cmd);

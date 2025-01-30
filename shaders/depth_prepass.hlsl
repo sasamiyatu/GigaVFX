@@ -64,6 +64,8 @@ void fs_main(VSOutput input)
                 InterlockedAdd(particle_system_state[0].particles_to_emit, 1, index);
                 uint dispatch_count = ((index + 1) + 63) / 64;
                 InterlockedMax(particle_dispatch[0].x, dispatch_count);
+                particle_dispatch[0].y = 1;
+                particle_dispatch[0].z = 1;
                 float2 spawn_uv = input.position.xy / globals.resolution.xy;
                 float3 spawn_pos = input.world_pos;
                 particles_spawned[index] = spawn_pos;

@@ -266,7 +266,7 @@ struct ParticleSystemSimple : IConfigUI
     // Double buffered
     Buffer particle_buffer[2] = {};
 
-    GPUBuffer emit_indirect_dispatch_buffer = {};
+    Buffer emit_indirect_dispatch_buffer = {};
 
     std::vector<DescriptorInfo> descriptors;
     ParticleTemplatePushConstants push_constants;

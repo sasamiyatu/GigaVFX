@@ -220,4 +220,5 @@ struct ParticleTemplatePushConstants
     uint particle_capacity;
     float delta_time;
     uint32_t system_index;
+    bool externally_dispatched;
 };
